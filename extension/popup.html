@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus RF — Tarang Sanchar Extractor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <span class="logo-icon">📡</span>
+        <div>
+          <h1>Nexus RF</h1>
+          <p class="subtitle">Tarang Sanchar Tower Extractor</p>
+        </div>
+      </div>
+      <div class="status-badge" id="status-badge">
+        <span class="status-dot"></span>
+        <span id="status-text">Active</span>
+      </div>
+    </header>
+
+    <!-- Stats Overview -->
+    <div class="stats-card">
+      <div class="stats-summary-row">
+        <div class="stat-box">
+          <span class="stat-number" id="sites-count">0</span>
+          <span class="stat-label">Sites Located</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-number" id="towers-count" style="color: #10b981;">0</span>
+          <span class="stat-label">Towers Compiled</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-number" id="enriched-count" style="color: #a855f7;">0</span>
+          <span class="stat-label">Enriched</span>
+        </div>
+      </div>
+
+      <!-- Auto-Scan Grid Section (Slide by slide with resume) -->
+      <div class="scan-card">
+        <div class="scan-header">
+          <span class="scan-title">🛰 Auto-Grid Scanner (Slide by Slide)</span>
+          <span class="scan-badge" id="scan-progress-badge">Ready</span>
+        </div>
+
+        <!-- Start & End Coordinates -->
+        <div class="popup-coord-box">
+          <div class="popup-coord-row">
+            <span class="coord-label">Start (SW):</span>
+            <input type="number" step="0.0001" id="popup-start-lat" placeholder="Start Lat" class="popup-input" />
+            <input type="number" step="0.0001" id="popup-start-lng" placeholder="Start Lng" class="popup-input" />
+          </div>
+          <div class="popup-coord-row">
+            <span class="coord-label">End (NE):</span>
+            <input type="number" step="0.0001" id="popup-end-lat" placeholder="End Lat" class="popup-input" />
+            <input type="number" step="0.0001" id="popup-end-lng" placeholder="End Lng" class="popup-input" />
+          </div>
+          <div class="popup-coord-footer">
+            <button id="btn-popup-use-view" class="btn btn-secondary btn-sm" title="Fill with current visible map coordinates">🗺 Use Map View</button>
+            <span id="popup-slide-count" class="slide-count-text">0 slides</span>
+          </div>
+        </div>
+
+        <div class="scan-progress-bar-bg">
+          <div class="scan-progress-bar-fill" id="scan-progress-fill" style="width: 0%;"></div>
+        </div>
+        <div class="scan-actions">
+          <button id="btn-toggle-scan" class="btn btn-scan">▶ Start Auto-Scan</button>
+          <button id="btn-reset-scan" class="btn btn-secondary" title="Reset scan progress">Stop / Reset</button>
+        </div>
+      </div>
+
+      <!-- Mode selection toggle -->
+      <div class="mode-box">
+        <div class="mode-row">
+          <label class="mode-switch">
+            <input type="checkbox" id="raw-mode-toggle" />
+            <span class="slider"></span>
+          </label>
+          <div class="mode-info">
+            <strong>Raw Mode (Locations & Types Only)</strong>
+            <span>Exports real coordinates & structure type with null operator & band info</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="enrich-bar">
+        <button id="btn-fetch-details" class="btn btn-outline" title="Fetch operators for sites in view">
+          ⚡ Auto-Enrich Real Operators (Jio/Airtel/Vi/BSNL)
+        </button>
+      </div>
+
+      <div class="breakdown-section">
+        <div class="breakdown-title">Operators</div>
+        <div class="tags-container" id="operator-tags">
+          <span class="tag tag-dim">No data</span>
+        </div>
+      </div>
+
+      <div class="breakdown-section">
+        <div class="breakdown-title">Technology</div>
+        <div class="tags-container" id="tech-tags">
+          <span class="tag tag-dim">No data</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search & Filter -->
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search by Site ID, Operator, Tech..." />
+    </div>
+
+    <!-- Tower List Preview -->
+    <div class="table-container">
+      <table class="towers-table">
+        <thead>
+          <tr>
+            <th>Operator</th>
+            <th>Tech</th>
+            <th>Site ID</th>
+            <th>Lat, Lng</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody id="towers-body">
+          <tr>
+            <td colspan="5" class="empty-state">No towers captured yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Actions / Export Footer -->
+    <footer class="footer">
+      <div class="export-actions">
+        <button id="btn-export-raw-csv" class="btn btn-raw" title="Export Raw CSV with null operator/band">
+          📥 Raw CSV
+        </button>
+        <button id="btn-export-csv" class="btn btn-primary" title="Export Full CSV with multi-operator breakdown">
+          📥 Full CSV
+        </button>
+        <button id="btn-export-json" class="btn btn-secondary" title="Export JSON">
+          JSON
+        </button>
+      </div>
+      <button id="btn-clear" class="btn btn-danger" title="Clear all stored tower data">
+        Clear
+      </button>
+    </footer>
+  </div>
+
+  <script src="parser.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

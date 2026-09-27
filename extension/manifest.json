@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Nexus RF — Tarang Sanchar Tower Extractor",
+  "version": "1.3.0",
+  "description": "Captures and exports mobile cellular tower data from Tarang Sanchar for the Nexus RF simulation engine.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://tarangsanchar.gov.in/*",
+    "*://*.tarangsanchar.gov.in/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Nexus RF — Tarang Sanchar Extractor",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://tarangsanchar.gov.in/*",
+        "*://*.tarangsanchar.gov.in/*"
+      ],
+      "js": [
+        "parser.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected.js",
+        "parser.js"
+      ],
+      "matches": [
+        "*://tarangsanchar.gov.in/*",
+        "*://*.tarangsanchar.gov.in/*"
+      ]
+    }
+  ]
+}
