@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db.session import get_db
 from ..db.models import Tower, Obstacle
-from ..schemas import SimulateRequest, SimulateResponse
+from ..schemas import SimulateRequest, SimulateResponse, SimulateMultiRequest, SimulateMultiResponse
 from ..rf_engine.coverage_service import (
     generate_coverage, TowerConfig, Thresholds,
     auto_select_model, auto_detect_environment,
