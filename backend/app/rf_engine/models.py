@@ -179,6 +179,41 @@ def antenna_gain_db(bearing_deg: float, azimuth_deg: float | None,
     return boresight_gain_db * taper
 
 
+def composite_antenna_gain_db(bearing_deg: float, azimuth_deg: float | None,
+                              sectors_count: int = 3, beamwidth_deg: float = 65.0,
+                              boresight_gain_db: float = 7.0,
+                              back_lobe_suppression_db: float = -20.0) -> float:
+    """
+    Antenna gain for standard cellular deployments.
+    - If azimuth_deg is None: Omnidirectional (0.0 dB gain uniformly in 360°).
+    - If sectors_count >= 3: Standard 3-sector cellular macro base station (e.g. 0°, 120°, 240°).
+      Mobile devices connect to the strongest sector, giving realistic composite 360°
+      circular coverage with terrain and building shadowing.
+    - If sectors_count == 2: Bi-directional sector site (0°, 180°).
+    - If sectors_count == 1: Single directional sector pointing towards azimuth_deg.
+    """
+    if azimuth_deg is None:
+        return 0.0
+    if sectors_count <= 1:
+        return antenna_gain_db(bearing_deg, azimuth_deg, beamwidth_deg, boresight_gain_db, back_lobe_suppression_db)
+
+    # 3-sector or multi-sector composite: max gain over all sectors
+    n_sec = max(2, sectors_count)
+    spacing = 360.0 / n_sec
+    gains = [
+        antenna_gain_db(
+            bearing_deg,
+            (azimuth_deg + i * spacing) % 360.0,
+            beamwidth_deg=beamwidth_deg,
+            boresight_gain_db=boresight_gain_db,
+            back_lobe_suppression_db=back_lobe_suppression_db,
+        )
+        for i in range(n_sec)
+    ]
+    # For cellular macro sites, composite gain across handoff sectors retains a minimum gain of 0 dB (omni equivalent)
+    return max(max(gains), 0.0)
+
+
 # ---------------------------------------------------------------------------
 # Single knife-edge diffraction (terrain obstruction)
 # ---------------------------------------------------------------------------

@@ -52,6 +52,29 @@ export interface SimulateResponse {
   center_rsrp_dbm: number;
   rsrq_db: number;
   sinr_db: number;
+  color?: string;
+  tower_id?: string;
+  tower_lat?: number;
+  tower_lng?: number;
+  operator?: string;
+  technology?: string;
+  freq_mhz?: number;
+  power_dbm?: number;
+  height_m?: number;
+}
+
+export interface SimulateMultiRequest {
+  tower_ids?: string[];
+  site_id?: string;
+  color_mode?: 'operator' | 'band' | 'rsrp';
+  resolution?: number;
+  terrain_aware?: boolean;
+  building_aware?: boolean;
+}
+
+export interface SimulateMultiResponse {
+  layers: SimulateResponse[];
+  site_id?: string;
 }
 
 export interface CompareRequest {

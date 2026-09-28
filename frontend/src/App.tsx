@@ -22,6 +22,9 @@ export default function App() {
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [simSiteTowers, setSimSiteTowers] = useState<Tower[] | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulateResponse | null>(null);
+  const [simulationResults, setSimulationResults] = useState<SimulateResponse[] | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [simPanelMode, setSimPanelMode] = useState<'simulate' | 'add' | 'edit'>('simulate');
 
   const fetchTowers = async () => {
     try {
@@ -39,10 +42,13 @@ export default function App() {
     setSelectedLocation({ lat, lng });
   };
 
-  const handleSiteSelect = (siteTowers: Tower[], _switchToSim = true) => {
+  const handleSiteSelect = (siteTowers: Tower[], switchToSim = true) => {
     setSimSiteTowers(siteTowers);
     setSelectedLocation({ lat: siteTowers[0].lat, lng: siteTowers[0].lng });
     setActiveTab('simulate');
+    setSimPanelMode(switchToSim ? 'simulate' : 'edit');
+    // Ensure sidebar is visible when user selects or edits a site
+    setIsSidebarOpen(true);
   };
 
   return (
@@ -58,9 +64,12 @@ export default function App() {
             <button
               key={id}
               title={label}
-              onClick={() => setActiveTab(id)}
+              onClick={() => {
+                setActiveTab(id);
+                setIsSidebarOpen(true);
+              }}
               className={`p-3 rounded-xl flex justify-center transition-all ${
-                activeTab === id
+                activeTab === id && isSidebarOpen
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
               }`}
@@ -71,48 +80,68 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Side panel ─────────────────────────────────────────────────── */}
-      <div className="w-96 bg-slate-900 border-r border-slate-800 z-10 flex flex-col shadow-2xl shrink-0">
-        {activeTab === 'rf-planning' && (
-          <RFPlanningPanel
-            lat={selectedLocation?.lat ?? null}
-            lng={selectedLocation?.lng ?? null}
-            onPlanDeployed={fetchTowers}
-          />
-        )}
-        {activeTab === 'simulate' && (
-          <SimulationPanel
-            towers={towers}
-            selectedSiteTowers={simSiteTowers}
-            lat={selectedLocation?.lat ?? null}
-            lng={selectedLocation?.lng ?? null}
-            onSimulationComplete={setSimulationResult}
-            onTowersChanged={fetchTowers}
-          />
-        )}
-        {activeTab === 'compare' && (
-          <ComparePanel
-            lat={selectedLocation?.lat ?? null}
-            lng={selectedLocation?.lng ?? null}
-          />
-        )}
-        {activeTab === 'import' && (
-          <ImportPanel
-            onImportComplete={fetchTowers}
-            onTowersDeleted={fetchTowers}
-          />
-        )}
-      </div>
+      {/* ── Collapsible Side Panel (Full-screen toggleable) ─────────────── */}
+      {isSidebarOpen && (
+        <div className="w-96 bg-slate-900 border-r border-slate-800 z-10 flex flex-col shadow-2xl shrink-0 transition-all duration-200">
+          {activeTab === 'rf-planning' && (
+            <RFPlanningPanel
+              lat={selectedLocation?.lat ?? null}
+              lng={selectedLocation?.lng ?? null}
+              onPlanDeployed={fetchTowers}
+            />
+          )}
+          {activeTab === 'simulate' && (
+            <SimulationPanel
+              towers={towers}
+              selectedSiteTowers={simSiteTowers}
+              lat={selectedLocation?.lat ?? null}
+              lng={selectedLocation?.lng ?? null}
+              initialMode={simPanelMode}
+              onSimulationComplete={(res) => {
+                setSimulationResult(res);
+                if (!res) setSimulationResults(null);
+              }}
+              onMultiSimulationComplete={(results) => {
+                setSimulationResults(results);
+                if (results && results.length > 0) {
+                  setSimulationResult(results[0]);
+                } else {
+                  setSimulationResult(null);
+                }
+              }}
+              onTowersChanged={fetchTowers}
+            />
+          )}
+          {activeTab === 'compare' && (
+            <ComparePanel
+              lat={selectedLocation?.lat ?? null}
+              lng={selectedLocation?.lng ?? null}
+            />
+          )}
+          {activeTab === 'import' && (
+            <ImportPanel
+              onImportComplete={fetchTowers}
+              onTowersDeleted={fetchTowers}
+            />
+          )}
+        </div>
+      )}
 
-      {/* ── Map ────────────────────────────────────────────────────────── */}
+      {/* ── Map (Expands to full screen when sidebar is collapsed) ───────── */}
       <div className="flex-1 relative z-0 min-w-0 min-h-0">
         <MapView
           towers={towers}
           simulationResult={activeTab === 'simulate' ? simulationResult : null}
+          simulationResults={activeTab === 'simulate' ? simulationResults : null}
           onLocationSelect={handleMapClick}
           onSiteSelect={handleSiteSelect}
-          onImportClick={() => setActiveTab('import')}
+          onImportClick={() => {
+            setActiveTab('import');
+            setIsSidebarOpen(true);
+          }}
           onTowersChanged={fetchTowers}
+          isSidebarOpen={isSidebarOpen}
+          onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
         />
       </div>
     </div>

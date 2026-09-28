@@ -21,7 +21,7 @@ from functools import lru_cache
 
 from PIL import Image
 
-from .models import Model, Environment, path_loss, antenna_gain_db, knife_edge_diffraction_loss
+from .models import Model, Environment, path_loss, antenna_gain_db, composite_antenna_gain_db, knife_edge_diffraction_loss
 from .geo import haversine_km, bearing_deg, Point, path_crosses_obstacle
 
 # ── colours (match frontend legend) ─────────────────────────────────────────
@@ -29,6 +29,12 @@ COLOR_GREEN = (31, 157, 85, 190)
 COLOR_AMBER = (217, 134, 10, 175)
 COLOR_RED   = (216, 57, 59, 150)
 COLOR_NONE  = (0, 0, 0, 0)
+
+def hex_to_rgb(hex_code: str) -> tuple[int, int, int]:
+    h = hex_code.lstrip('#')
+    if len(h) == 3:
+        h = ''.join(c * 2 for c in h)
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 OBSTRUCTION_PENALTY_DB = 14.0    # flat per drawn obstacle polygon
 BUILDING_PENALTY_DB   = 18.0    # per OSM building in path
@@ -99,7 +105,8 @@ class TowerConfig:
     power_dbm: float
     bandwidth_mhz: float = 10.0
     azimuth_deg: float | None = None   # None → omnidirectional
-    beamwidth_deg: float = 360.0       # 360 = omni, else sector beamwidth
+    beamwidth_deg: float = 65.0        # Sector beamwidth (degrees)
+    sectors_count: int = 3             # 3 = tri-sector cellular macro (circular composite), 1 = directional
 
 
 @dataclass
@@ -124,6 +131,7 @@ class CoverageResult:
     center_rsrp_dbm: float = -65.0
     rsrq_db: float = -11.0
     sinr_db: float = 14.0
+    color: str = "#22c55e"
 
 
 # ── auto model selection ─────────────────────────────────────────────────────
@@ -272,7 +280,7 @@ def _max_range_km(tower: TowerConfig, model: Model, env: Environment, thresholds
 
     def rx_at(d_km: float) -> float:
         pl   = path_loss(model, d_km, tower.freq_mhz, hb, hm, env)
-        gain = antenna_gain_db(0.0, tower.azimuth_deg)
+        gain = composite_antenna_gain_db(0.0, tower.azimuth_deg, tower.sectors_count, tower.beamwidth_deg)
         return tower.power_dbm + gain - pl
 
     lo, hi = 0.01, 30.0
@@ -296,6 +304,7 @@ def generate_coverage(
     resolution: int = 120,
     terrain_aware: bool = True,
     building_aware: bool = True,
+    color_tint: str | None = None,
 ) -> CoverageResult:
     """
     Generate a terrain- and building-aware RGBA coverage raster with RSRP estimation.
@@ -360,6 +369,18 @@ def generate_coverage(
     img    = Image.new("RGBA", (resolution, resolution), (0, 0, 0, 0))
     pixels = img.load()
 
+    if color_tint:
+        cr, cg, cb = hex_to_rgb(color_tint)
+        c_green = (cr, cg, cb, 215)
+        c_amber = (cr, cg, cb, 145)
+        c_red   = (cr, cg, cb, 75)
+        active_color = color_tint
+    else:
+        c_green = COLOR_GREEN
+        c_amber = COLOR_AMBER
+        c_red   = COLOR_RED
+        active_color = "#22c55e"
+
     tx_point  = Point(tower.lat, tower.lng)
     cell_km2  = (max_r * 2 / resolution) ** 2
     area      = {"green": 0.0, "amber": 0.0, "red": 0.0}
@@ -383,7 +404,7 @@ def generate_coverage(
 
             brg  = bearing_deg(tower.lat, tower.lng, lat, lng)
             pl   = path_loss(model, max(d, 0.01), tower.freq_mhz, hb, hm, env)
-            gain = antenna_gain_db(brg, tower.azimuth_deg)
+            gain = composite_antenna_gain_db(brg, tower.azimuth_deg, tower.sectors_count, tower.beamwidth_deg)
             rx   = tower.power_dbm + gain - pl
 
             # ── obstacle / building penalty ──────────────────────────────────
@@ -413,15 +434,15 @@ def generate_coverage(
 
             # ── classify ─────────────────────────────────────────────────────
             if rx >= thresholds.green_dbm:
-                pixels[px, py] = COLOR_GREEN
+                pixels[px, py] = c_green
                 area["green"] += cell_km2
                 rx_covered_values.append(rx)
             elif rx >= thresholds.amber_dbm:
-                pixels[px, py] = COLOR_AMBER
+                pixels[px, py] = c_amber
                 area["amber"] += cell_km2
                 rx_covered_values.append(rx)
             elif rx >= thresholds.red_dbm:
-                pixels[px, py] = COLOR_RED
+                pixels[px, py] = c_red
                 area["red"] += cell_km2
                 rx_covered_values.append(rx)
 
@@ -437,7 +458,7 @@ def generate_coverage(
 
     # Center (near-tower ~100m) RSRP
     center_pl = path_loss(model, 0.1, tower.freq_mhz, hb, hm, env)
-    center_rx = tower.power_dbm + antenna_gain_db(0.0, tower.azimuth_deg) - center_pl
+    center_rx = tower.power_dbm + composite_antenna_gain_db(0.0, tower.azimuth_deg, tower.sectors_count, tower.beamwidth_deg) - center_pl
     center_rsrp = round(center_rx - rsrp_offset, 1)
 
     # 3GPP estimates
@@ -458,5 +479,6 @@ def generate_coverage(
         center_rsrp_dbm=center_rsrp,
         rsrq_db=rsrq_est,
         sinr_db=sinr_est,
+        color=active_color,
     )
 

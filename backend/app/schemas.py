@@ -35,6 +35,9 @@ class TowerUpdate(BaseModel):
     bandwidth_mhz: Optional[float] = None
     tower_type: Optional[str] = None
     azimuth_deg: Optional[float] = None
+    site_id: Optional[str] = None
+    cell_id: Optional[str] = None
+    source: Optional[str] = None
 
 
 class TowerOut(TowerCreate):
@@ -84,6 +87,29 @@ class SimulateResponse(BaseModel):
     center_rsrp_dbm: float = -65.0
     rsrq_db: float = -11.0
     sinr_db: float = 14.0
+    color: Optional[str] = "#22c55e"
+    tower_id: Optional[str] = None
+    tower_lat: Optional[float] = None
+    tower_lng: Optional[float] = None
+    operator: Optional[str] = None
+    technology: Optional[str] = None
+    freq_mhz: Optional[float] = None
+    power_dbm: Optional[float] = None
+    height_m: Optional[float] = None
+
+
+class SimulateMultiRequest(BaseModel):
+    tower_ids: List[str] = []
+    site_id: Optional[str] = None
+    color_mode: str = "operator"  # "operator" | "band" | "rsrp"
+    resolution: int = 120
+    terrain_aware: bool = True
+    building_aware: bool = True
+
+
+class SimulateMultiResponse(BaseModel):
+    layers: List[SimulateResponse]
+    site_id: Optional[str] = None
 
 
 class CompareRequest(BaseModel):

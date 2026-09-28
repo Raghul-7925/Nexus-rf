@@ -3,6 +3,7 @@ import {
   Tower, TowerCreate,
   Obstacle, ObstacleCreate,
   SimulateRequest, SimulateResponse,
+  SimulateMultiRequest, SimulateMultiResponse,
   CompareRequest, CompareResponse,
   RFPlanRequest, RFPlanResponse, RFRecommendedSite,
 } from '../types';
@@ -34,6 +35,8 @@ export const obstacleAPI = {
 export const simulateAPI = {
   simulate: async (towerId: string, d: SimulateRequest): Promise<SimulateResponse> =>
     (await api.post(`/simulate/${towerId}`, d)).data,
+  simulateMulti: async (d: SimulateMultiRequest): Promise<SimulateMultiResponse> =>
+    (await api.post('/simulate/multi', d)).data,
 };
 
 export const rfPlanAPI = {
