@@ -4,6 +4,7 @@ sqlalchemy==2.0.35
 pydantic==2.9.2
 python-multipart==0.0.9
 aiofiles>=24.1.0
+Pillow>=10.0.0
 pytest==8.3.3
 
 # Geospatial (only needed once you wire in real DEM/PostGIS —
