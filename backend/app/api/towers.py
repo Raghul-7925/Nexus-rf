@@ -28,10 +28,10 @@ def create_tower(payload: TowerCreate, db: Session = Depends(get_db)):
 @router.get("", response_model=list[TowerOut])
 def list_towers(source: str | None = None, db: Session = Depends(get_db)):
     q = db.query(Tower)
-    if source == "user_test":
-        q = q.filter(Tower.source.in_(["user_test", "manual", "rf_planned", "import"]))
-    elif source == "real":
-        q = q.filter(Tower.source.in_(["tarangsanchar", "tarangsanchar_seed"]))
+    if source in ("user_test", "test", "planning"):
+        q = q.filter(Tower.source.in_(["user_test", "manual", "rf_planned"]))
+    elif source in ("real", "verified", "tarangsanchar"):
+        q = q.filter(Tower.source.in_(["tarangsanchar", "tarangsanchar_seed", "import", "import_enriched", "netmonster_verified", "verified", "dot_verified"]))
     return q.all()
 
 
@@ -39,13 +39,14 @@ def list_towers(source: str | None = None, db: Session = Depends(get_db)):
 def delete_all_towers(source: str | None = None, db: Session = Depends(get_db)):
     """Delete towers in bulk. Can delete all or only user_test/planned towers."""
     q = db.query(Tower)
-    if source == "user_test":
-        q = q.filter(Tower.source.in_(["user_test", "manual", "rf_planned", "import"]))
-    elif source == "real":
-        q = q.filter(Tower.source.in_(["tarangsanchar", "tarangsanchar_seed"]))
+    if source in ("user_test", "test", "planning"):
+        q = q.filter(Tower.source.in_(["user_test", "manual", "rf_planned"]))
+    elif source in ("real", "verified", "tarangsanchar"):
+        q = q.filter(Tower.source.in_(["tarangsanchar", "tarangsanchar_seed", "import", "import_enriched", "netmonster_verified", "verified", "dot_verified"]))
     count = q.delete(synchronize_session=False)
     db.commit()
     return {"deleted_count": count, "source_filter": source or "all"}
+
 
 
 @router.get("/{tower_id}", response_model=TowerOut)

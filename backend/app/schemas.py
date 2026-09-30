@@ -21,6 +21,10 @@ class TowerCreate(BaseModel):
     source: str = "manual"
     cell_id: Optional[str] = None
     site_id: Optional[str] = None
+    pci: Optional[str] = None
+    area: Optional[str] = None
+    channel: Optional[float] = None
+    location_name: Optional[str] = None
 
 
 class TowerUpdate(BaseModel):
@@ -38,6 +42,10 @@ class TowerUpdate(BaseModel):
     site_id: Optional[str] = None
     cell_id: Optional[str] = None
     source: Optional[str] = None
+    pci: Optional[str] = None
+    area: Optional[str] = None
+    channel: Optional[float] = None
+    location_name: Optional[str] = None
 
 
 class TowerOut(TowerCreate):
@@ -64,10 +72,10 @@ class SimulateRequest(BaseModel):
     # Auto-selected when None – frontend never needs to send these
     model: Optional[str] = None        # None → auto from freq
     environment: Optional[str] = None  # None → auto via Nominatim
-    # Signal thresholds (dBm)
+    # 3GPP RSRP Signal thresholds (dBm)
     green_dbm: float = -85.0
-    amber_dbm: float = -100.0
-    red_dbm: float = -110.0
+    amber_dbm: float = -98.0
+    red_dbm: float = -108.0
     resolution: int = 120
     terrain_aware: bool = True          # use Open-Elevation terrain
     building_aware: bool = True         # use OSM building footprints
@@ -110,6 +118,15 @@ class SimulateMultiRequest(BaseModel):
 class SimulateMultiResponse(BaseModel):
     layers: List[SimulateResponse]
     site_id: Optional[str] = None
+    composite_png_base64: Optional[str] = None
+    overlap_png_base64: Optional[str] = None
+    deadzone_png_base64: Optional[str] = None
+    composite_bounds: Optional[List[float]] = None
+    total_coverage_km2: Optional[float] = None
+    overlap_area_km2: Optional[float] = None
+    overlap_percentage: Optional[float] = None
+    deadzone_area_km2: Optional[float] = None
+    towers_count: Optional[int] = 0
 
 
 class CompareRequest(BaseModel):
@@ -117,8 +134,9 @@ class CompareRequest(BaseModel):
     lng: float
     radius_km: float = 5.0
     sort_by: str = "balanced"
-    model: str = "hata"
+    model: str = "cost231"
     environment: str = "urban"
+    data_source: str = "verified"  # "verified" | "test" | "all"
 
 
 class CompareResultItem(BaseModel):
@@ -134,10 +152,13 @@ class CompareResultItem(BaseModel):
     balanced_score: float
     bands_available: List[str]
     verdict: Optional[str] = None
+    data_source: Optional[str] = "Verified TarangSanchar / DoT"
 
 
 class CompareResponse(BaseModel):
     results: List[CompareResultItem]
+    data_source_mode: str = "Verified Portal Data"
+
 
 
 class RFRecommendedSite(BaseModel):

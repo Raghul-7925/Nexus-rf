@@ -37,6 +37,10 @@ class Tower(Base):
     source = Column(String, default="manual")         # manual | tarangsanchar_seed | import
     cell_id = Column(String, nullable=True)
     site_id = Column(String, nullable=True)
+    pci = Column(String, nullable=True)
+    area = Column(String, nullable=True)
+    channel = Column(Float, nullable=True)
+    location_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

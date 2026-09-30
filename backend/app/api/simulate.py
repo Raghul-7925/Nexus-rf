@@ -1,5 +1,5 @@
 """
-app/api/simulate.py  –  terrain-aware, auto model/environment
+app/api/simulate.py  –  terrain-aware, multi-tower & multi-carrier simulation
 """
 
 import base64
@@ -11,13 +11,163 @@ from ..db.session import get_db
 from ..db.models import Tower, Obstacle
 from ..schemas import SimulateRequest, SimulateResponse, SimulateMultiRequest, SimulateMultiResponse
 from ..rf_engine.coverage_service import (
-    generate_coverage, TowerConfig, Thresholds,
+    generate_coverage, generate_multi_site_coverage, TowerConfig, Thresholds,
     auto_select_model, auto_detect_environment,
 )
 from ..rf_engine.models import Model, Environment
 from ..rf_engine.geo import Point
 
 router = APIRouter(prefix="/api/simulate", tags=["simulate"])
+
+OP_COLOR_MAP = {
+    "airtel": "#ef4444",
+    "jio": "#f97316",
+    "vi": "#eab308",
+    "bsnl": "#22c55e",
+}
+
+
+def resolve_cell_color(op: str | None, freq: float | None, mode: str = "operator") -> str:
+    if mode == "band" and freq:
+        if freq < 1000:
+            return "#06b6d4"  # Cyan Sub-1GHz
+        elif freq < 2500:
+            return "#8b5cf6"  # Purple Mid-band
+        else:
+            return "#ec4899"  # Pink C-band / High-band
+    if op:
+        opl = op.lower()
+        for k, v in OP_COLOR_MAP.items():
+            if k in opl:
+                return v
+    return "#3b82f6"
+
+
+# ── CRITICAL: /multi MUST be declared BEFORE /{tower_id} to prevent path shadowing ──
+@router.post("/multi", response_model=SimulateMultiResponse)
+def simulate_multi(payload: SimulateMultiRequest, db: Session = Depends(get_db)):
+    """
+    Simulate multiple carrier bands and multiple towers simultaneously.
+    Computes individual layers, composite coverage, overlapping interference
+    zones (handover ping-pong regions), and deadzones (coverage holes).
+    """
+    if payload.site_id:
+        towers = db.query(Tower).filter(Tower.site_id == payload.site_id).all()
+        if not towers:
+            t = db.query(Tower).filter(Tower.id == payload.site_id).first()
+            towers = [t] if t else []
+    elif payload.tower_ids:
+        towers = db.query(Tower).filter(Tower.id.in_(payload.tower_ids)).all()
+    else:
+        raise HTTPException(status_code=400, detail="Must provide site_id or tower_ids")
+
+    valid_towers = [t for t in towers if t.freq_mhz is not None]
+    if not valid_towers:
+        raise HTTPException(status_code=400, detail="No configured radio cells found for simulation.")
+
+    obstacles_db = db.query(Obstacle).all()
+    obstacle_polys = [[Point(p[0], p[1]) for p in o.points] for o in obstacles_db]
+
+    layers: list[SimulateResponse] = []
+    thresholds = Thresholds()
+    tower_configs: list[TowerConfig] = []
+
+    for tower in valid_towers:
+        color = resolve_cell_color(tower.operator, tower.freq_mhz, payload.color_mode)
+        model = auto_select_model(tower.freq_mhz)
+        env = auto_detect_environment(round(tower.lat, 4), round(tower.lng, 4))
+
+        config = TowerConfig(
+            lat=tower.lat,
+            lng=tower.lng,
+            freq_mhz=tower.freq_mhz,
+            height_m=tower.height_m,
+            power_dbm=tower.power_dbm,
+            bandwidth_mhz=tower.bandwidth_mhz or 10.0,
+            azimuth_deg=tower.azimuth_deg,
+            sectors_count=3,
+        )
+        tower_configs.append(config)
+
+        res = generate_coverage(
+            config,
+            obstacle_polys,
+            model=model,
+            env=env,
+            thresholds=thresholds,
+            resolution=payload.resolution,
+            terrain_aware=payload.terrain_aware,
+            building_aware=payload.building_aware,
+            color_tint=color,
+        )
+
+        layers.append(
+            SimulateResponse(
+                png_base64=base64.b64encode(res.png_bytes).decode("ascii"),
+                bounds=list(res.bounds),
+                max_range_km=res.max_range_km,
+                area_km2=res.area_km2,
+                model=res.model,
+                environment=res.environment,
+                terrain_aware=res.terrain_aware,
+                building_aware=res.building_aware,
+                buildings_count=res.buildings_count,
+                avg_rsrp_dbm=res.avg_rsrp_dbm,
+                center_rsrp_dbm=res.center_rsrp_dbm,
+                rsrq_db=res.rsrq_db,
+                sinr_db=res.sinr_db,
+                color=color,
+                tower_id=tower.id,
+                tower_lat=tower.lat,
+                tower_lng=tower.lng,
+                operator=tower.operator,
+                technology=tower.technology,
+                freq_mhz=tower.freq_mhz,
+                power_dbm=tower.power_dbm,
+                height_m=tower.height_m,
+            )
+        )
+
+    # Multi-site composite raster, overlap zones, and deadzones
+    composite_png = None
+    overlap_png = None
+    deadzone_png = None
+    composite_bounds = None
+    total_cov = None
+    overlap_cov = None
+    overlap_pct = None
+    deadzone_cov = None
+
+    try:
+        multi_res = generate_multi_site_coverage(
+            tower_configs,
+            resolution=min(payload.resolution, 140),
+            thresholds=thresholds,
+        )
+        composite_png = base64.b64encode(multi_res.composite_png_bytes).decode("ascii")
+        overlap_png = base64.b64encode(multi_res.overlap_png_bytes).decode("ascii")
+        deadzone_png = base64.b64encode(multi_res.deadzone_png_bytes).decode("ascii")
+        composite_bounds = list(multi_res.bounds)
+        total_cov = multi_res.total_coverage_km2
+        overlap_cov = multi_res.overlap_area_km2
+        overlap_pct = multi_res.overlap_percentage
+        deadzone_cov = multi_res.deadzone_area_km2
+    except Exception as e:
+        print(f"Multi-site composite calculation note: {e}")
+
+    return SimulateMultiResponse(
+        layers=layers,
+        site_id=payload.site_id,
+        composite_png_base64=composite_png,
+        overlap_png_base64=overlap_png,
+        deadzone_png_base64=deadzone_png,
+        composite_bounds=composite_bounds,
+        total_coverage_km2=total_cov,
+        overlap_area_km2=overlap_cov,
+        overlap_percentage=overlap_pct,
+        deadzone_area_km2=deadzone_cov,
+        towers_count=len(valid_towers),
+    )
 
 
 @router.post("/{tower_id}", response_model=SimulateResponse)
@@ -105,111 +255,3 @@ def simulate(tower_id: str, payload: SimulateRequest, db: Session = Depends(get_
         power_dbm=tower.power_dbm,
         height_m=tower.height_m,
     )
-
-
-OP_COLOR_MAP = {
-    "airtel": "#ef4444",
-    "jio": "#f97316",
-    "vi": "#eab308",
-    "bsnl": "#22c55e",
-}
-
-def resolve_cell_color(op: str | None, freq: float | None, mode: str = "operator") -> str:
-    if mode == "band" and freq:
-        if freq < 1000:
-            return "#06b6d4"  # Cyan Sub-1GHz
-        elif freq < 2500:
-            return "#8b5cf6"  # Purple Mid-band
-        else:
-            return "#ec4899"  # Pink C-band / High-band
-    if op:
-        opl = op.lower()
-        for k, v in OP_COLOR_MAP.items():
-            if k in opl:
-                return v
-    return "#3b82f6"
-
-
-@router.post("/multi", response_model=SimulateMultiResponse)
-def simulate_multi(payload: SimulateMultiRequest, db: Session = Depends(get_db)):
-    """
-    Simulate multiple carrier bands and operators simultaneously.
-    Renders distinct color-coded layers for BSNL, Jio, Airtel, Vi, etc.
-    """
-    if payload.site_id:
-        towers = db.query(Tower).filter(Tower.site_id == payload.site_id).all()
-        if not towers:
-            t = db.query(Tower).filter(Tower.id == payload.site_id).first()
-            towers = [t] if t else []
-    elif payload.tower_ids:
-        towers = db.query(Tower).filter(Tower.id.in_(payload.tower_ids)).all()
-    else:
-        raise HTTPException(status_code=400, detail="Must provide site_id or tower_ids")
-
-    valid_towers = [t for t in towers if t.freq_mhz is not None]
-    if not valid_towers:
-        raise HTTPException(status_code=400, detail="No configured radio cells found for simulation.")
-
-    obstacles_db = db.query(Obstacle).all()
-    obstacle_polys = [[Point(p[0], p[1]) for p in o.points] for o in obstacles_db]
-
-    layers: list[SimulateResponse] = []
-    thresholds = Thresholds()
-
-    for tower in valid_towers:
-        color = resolve_cell_color(tower.operator, tower.freq_mhz, payload.color_mode)
-        model = auto_select_model(tower.freq_mhz)
-        env = auto_detect_environment(round(tower.lat, 4), round(tower.lng, 4))
-
-        config = TowerConfig(
-            lat=tower.lat,
-            lng=tower.lng,
-            freq_mhz=tower.freq_mhz,
-            height_m=tower.height_m,
-            power_dbm=tower.power_dbm,
-            bandwidth_mhz=tower.bandwidth_mhz or 10.0,
-            azimuth_deg=tower.azimuth_deg,
-            sectors_count=3,
-        )
-
-        res = generate_coverage(
-            config,
-            obstacle_polys,
-            model=model,
-            env=env,
-            thresholds=thresholds,
-            resolution=payload.resolution,
-            terrain_aware=payload.terrain_aware,
-            building_aware=payload.building_aware,
-            color_tint=color,
-        )
-
-        layers.append(
-            SimulateResponse(
-                png_base64=base64.b64encode(res.png_bytes).decode("ascii"),
-                bounds=list(res.bounds),
-                max_range_km=res.max_range_km,
-                area_km2=res.area_km2,
-                model=res.model,
-                environment=res.environment,
-                terrain_aware=res.terrain_aware,
-                building_aware=res.building_aware,
-                buildings_count=res.buildings_count,
-                avg_rsrp_dbm=res.avg_rsrp_dbm,
-                center_rsrp_dbm=res.center_rsrp_dbm,
-                rsrq_db=res.rsrq_db,
-                sinr_db=res.sinr_db,
-                color=color,
-                tower_id=tower.id,
-                tower_lat=tower.lat,
-                tower_lng=tower.lng,
-                operator=tower.operator,
-                technology=tower.technology,
-                freq_mhz=tower.freq_mhz,
-                power_dbm=tower.power_dbm,
-                height_m=tower.height_m,
-            )
-        )
-
-    return SimulateMultiResponse(layers=layers, site_id=payload.site_id)
-

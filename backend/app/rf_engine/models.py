@@ -159,24 +159,26 @@ def path_loss(model: Model, distance_km: float, freq_mhz: float,
 # ---------------------------------------------------------------------------
 def antenna_gain_db(bearing_deg: float, azimuth_deg: float | None,
                      beamwidth_deg: float = 65.0, boresight_gain_db: float = 7.0,
-                     back_lobe_suppression_db: float = -20.0) -> float:
+                     back_lobe_suppression_db: float = -25.0) -> float:
     """
-    Simplified sector antenna gain pattern (dB relative to omni).
+    Standard 3GPP TR 38.901 / ITU-R M.2412 horizontal sector antenna pattern.
 
-    Returns 0.0 for an omni antenna (azimuth_deg is None).
-    For a sector antenna, gain tapers from `boresight_gain_db` at the
-    pointing direction down to a fixed back-lobe suppression beyond
-    ~110 degrees off-boresight. This is a standard cosine/Gaussian-taper
-    approximation, not a manufacturer-specific pattern -- adequate for
-    academic what-if comparisons, and clearly documented as such.
+    Returns 0.0 dBi for an omnidirectional antenna (azimuth_deg is None).
+    For a sector antenna, calculates the continuous parabolic attenuation:
+        A_H(phi) = -min(12 * (phi / phi_3dB)^2, A_max)
+    where A_max = 25 dB (front-to-back ratio).
+    Total gain = boresight_gain_db + A_H(phi).
+    This creates smooth, realistic teardrop cellular lobes without artificial hard step cutoffs.
     """
     if azimuth_deg is None:
         return 0.0
+    # Normalized angular difference [-180, +180]
     diff = abs(((bearing_deg - azimuth_deg + 540) % 360) - 180)
-    if diff > 110:
-        return back_lobe_suppression_db
-    taper = math.exp(-((diff / (beamwidth_deg / 2)) ** 2))
-    return boresight_gain_db * taper
+    phi_3db = max(beamwidth_deg, 15.0)
+    # 3GPP horizontal attenuation formula
+    att_db = min(12.0 * ((diff / phi_3db) ** 2), abs(back_lobe_suppression_db))
+    return boresight_gain_db - att_db
+
 
 
 def composite_antenna_gain_db(bearing_deg: float, azimuth_deg: float | None,

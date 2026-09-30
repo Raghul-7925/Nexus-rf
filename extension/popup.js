@@ -1,13 +1,16 @@
 /**
  * Popup Script:
  * - Controls live stats and preview filtering.
- * - Auto-Grid Scanner (Slide by Slide, persistent resume).
+ * - District-Wise Automated Fast Tower Fetcher (pure locations only).
+ * - Custom Bounding-Box Auto-Grid Scanner (Slide by Slide, persistent resume).
  * - Raw Mode CSV export (pure locations & types with null operator/band).
  * - Full CSV export with multi-operator breakdown.
+ * - Direct 1-Click Push to Nexus RF Engine (localhost:8000).
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   let allTowers = [];
+  let currentScanMode = 'district'; // 'district' or 'coords'
 
   const sitesCountEl = document.getElementById('sites-count');
   const towersCountEl = document.getElementById('towers-count');
@@ -19,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnExportRawCsv = document.getElementById('btn-export-raw-csv');
   const btnExportCsv = document.getElementById('btn-export-csv');
   const btnExportJson = document.getElementById('btn-export-json');
+  const btnPushNexus = document.getElementById('btn-push-nexus');
   const btnClear = document.getElementById('btn-clear');
   const btnFetchDetails = document.getElementById('btn-fetch-details');
 
@@ -29,6 +33,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnResetScan = document.getElementById('btn-reset-scan');
   const rawModeToggle = document.getElementById('raw-mode-toggle');
 
+  // Tabs
+  const tabBtnDistrict = document.getElementById('tab-btn-district');
+  const tabBtnCoords = document.getElementById('tab-btn-coords');
+  const districtScanBox = document.getElementById('district-scan-box');
+  const coordsScanBox = document.getElementById('coords-scan-box');
+
+  // District elements
+  const popupStateSelect = document.getElementById('popup-state-select');
+  const popupDistrictSelect = document.getElementById('popup-district-select');
+  const popupDistrictSearch = document.getElementById('popup-district-search');
+  const districtInfoText = document.getElementById('district-info-text');
+
+  // Custom Coords elements
   const popupStartLat = document.getElementById('popup-start-lat');
   const popupStartLng = document.getElementById('popup-start-lng');
   const popupEndLat = document.getElementById('popup-end-lat');
@@ -36,6 +53,89 @@ document.addEventListener('DOMContentLoaded', () => {
   const popupSlideCount = document.getElementById('popup-slide-count');
   const btnPopupUseView = document.getElementById('btn-popup-use-view');
 
+  // ── Tab Switching ──────────────────────────────────────────────────────────
+  tabBtnDistrict.addEventListener('click', () => {
+    currentScanMode = 'district';
+    tabBtnDistrict.classList.add('active');
+    tabBtnCoords.classList.remove('active');
+    districtScanBox.style.display = 'flex';
+    coordsScanBox.style.display = 'none';
+    btnToggleScan.textContent = '⚡ Fast Fetch District Towers';
+  });
+
+  tabBtnCoords.addEventListener('click', () => {
+    currentScanMode = 'coords';
+    tabBtnCoords.classList.add('active');
+    tabBtnDistrict.classList.remove('active');
+    coordsScanBox.style.display = 'flex';
+    districtScanBox.style.display = 'none';
+    btnToggleScan.textContent = '▶ Start Auto-Scan (Bounds)';
+  });
+
+  // ── District Dropdown Population ───────────────────────────────────────────
+  function initDistrictsUI() {
+    if (typeof window.TarangDistricts === 'undefined') return;
+
+    const states = window.TarangDistricts.getStates();
+    popupStateSelect.innerHTML = '';
+    states.forEach(state => {
+      const opt = document.createElement('option');
+      opt.value = state;
+      opt.textContent = state;
+      if (state === 'Tamil Nadu') opt.selected = true;
+      popupStateSelect.appendChild(opt);
+    });
+
+    populateDistrictsForState(popupStateSelect.value || 'Tamil Nadu', 'Villupuram');
+
+    popupStateSelect.addEventListener('change', () => {
+      populateDistrictsForState(popupStateSelect.value);
+    });
+
+    popupDistrictSelect.addEventListener('change', updateDistrictInfo);
+
+    popupDistrictSearch.addEventListener('input', e => {
+      const q = e.target.value.trim().toLowerCase();
+      if (!q) {
+        populateDistrictsForState(popupStateSelect.value);
+        return;
+      }
+      const matched = window.TarangDistricts.findDistrictByName(q);
+      if (matched) {
+        popupStateSelect.value = matched.state;
+        populateDistrictsForState(matched.state, matched.district);
+      }
+    });
+  }
+
+  function populateDistrictsForState(state, preferredDistrict = null) {
+    const districts = window.TarangDistricts.getDistrictsForState(state);
+    popupDistrictSelect.innerHTML = '';
+    districts.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      if (preferredDistrict && d === preferredDistrict) opt.selected = true;
+      popupDistrictSelect.appendChild(opt);
+    });
+    updateDistrictInfo();
+  }
+
+  function updateDistrictInfo() {
+    const state = popupStateSelect.value;
+    const district = popupDistrictSelect.value;
+    const bounds = window.TarangDistricts.getDistrictBounds(state, district);
+    if (bounds) {
+      const slides = window.TarangDistricts.generateDistrictSlides(bounds);
+      districtInfoText.textContent = `${district}, ${state} · ${slides.length} slides (${bounds[0]}, ${bounds[1]} to ${bounds[2]}, ${bounds[3]})`;
+    } else {
+      districtInfoText.textContent = `${district}, ${state}`;
+    }
+  }
+
+  initDistrictsUI();
+
+  // ── Coordinate bounds calculations ─────────────────────────────────────────
   function updatePopupSlideCount() {
     if (!popupStartLat || !popupSlideCount) return;
     const sLat = parseFloat(popupStartLat.value);
@@ -59,6 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) el.addEventListener('input', updatePopupSlideCount);
   });
 
+  // ── Data & Scan Status Polling ─────────────────────────────────────────────
   function loadData() {
     chrome.runtime.sendMessage({ action: 'GET_STATS' }, stats => {
       if (stats) {
@@ -82,7 +183,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateScanUI(scan) {
-    if (scan.startLat && popupStartLat && !popupStartLat.value) {
+    if (scan.mode === 'district' && scan.districtName) {
+      if (popupDistrictSelect) popupDistrictSelect.value = scan.districtName;
+      if (popupStateSelect && scan.stateName) popupStateSelect.value = scan.stateName;
+    } else if (scan.startLat && popupStartLat && !popupStartLat.value) {
       popupStartLat.value = scan.startLat;
       popupStartLng.value = scan.startLng;
       popupEndLat.value = scan.endLat;
@@ -94,23 +198,25 @@ document.addEventListener('DOMContentLoaded', () => {
       const pct = Math.round((scan.completedCount / scan.totalTiles) * 100);
       scanFillEl.style.width = `${pct}%`;
 
+      const titlePrefix = scan.districtName ? `[${scan.districtName}] ` : '';
+
       if (scan.isScanning) {
-        scanBadgeEl.textContent = `Scanning: ${scan.completedCount}/${scan.totalTiles} slides (${pct}%)`;
+        scanBadgeEl.textContent = `${titlePrefix}Scanning: ${scan.completedCount}/${scan.totalTiles} slides (${pct}%)`;
         btnToggleScan.textContent = '⏸ Pause Scan';
         btnToggleScan.style.background = '#f59e0b';
       } else if (scan.isPaused) {
-        scanBadgeEl.textContent = `Paused at ${scan.completedCount}/${scan.totalTiles} slides`;
+        scanBadgeEl.textContent = `${titlePrefix}Paused at ${scan.completedCount}/${scan.totalTiles} slides`;
         btnToggleScan.textContent = '▶ Resume Scan';
         btnToggleScan.style.background = '#0284c7';
       } else if (scan.completedCount >= scan.totalTiles) {
-        scanBadgeEl.textContent = `All ${scan.totalTiles} slides completed!`;
-        btnToggleScan.textContent = '▶ Scan Again';
+        scanBadgeEl.textContent = `${titlePrefix}Completed all ${scan.totalTiles} slides!`;
+        btnToggleScan.textContent = scan.mode === 'district' ? '⚡ Scan District Again' : '▶ Scan Again';
         btnToggleScan.style.background = '#10b981';
       }
     } else {
       scanFillEl.style.width = '0%';
-      scanBadgeEl.textContent = 'Ready (Slide by Slide)';
-      btnToggleScan.textContent = '▶ Start Auto-Scan';
+      scanBadgeEl.textContent = 'Ready (Fast Fetch)';
+      btnToggleScan.textContent = currentScanMode === 'district' ? '⚡ Fast Fetch District Towers' : '▶ Start Auto-Scan';
       btnToggleScan.style.background = '#0284c7';
     }
   }
@@ -120,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const techCounts = {};
 
     towers.forEach(t => {
-      const op = t.operator || 'Unknown';
+      const op = t.operator || 'Raw/Unconfigured';
       opCounts[op] = (opCounts[op] || 0) + 1;
 
       const tech = t.technology || '4G';
@@ -144,16 +250,18 @@ document.addEventListener('DOMContentLoaded', () => {
     entries.forEach(([name, count]) => {
       const tag = document.createElement('span');
       tag.className = 'tag';
+      tag.dataset.filter = name;
 
-      if (type === 'op') {
-        const lower = name.toLowerCase();
-        if (lower.includes('jio')) tag.classList.add('tag-jio');
-        else if (lower.includes('airtel')) tag.classList.add('tag-airtel');
-        else if (lower.includes('vi') || lower.includes('idea') || lower.includes('vodafone')) tag.classList.add('tag-vi');
-        else if (lower.includes('bsnl')) tag.classList.add('tag-bsnl');
-      }
+      let colorClass = 'tag-other';
+      const lower = name.toLowerCase();
+      if (lower.includes('airtel')) colorClass = 'tag-airtel';
+      else if (lower.includes('jio')) colorClass = 'tag-jio';
+      else if (lower.includes('vi') || lower.includes('vodafone')) colorClass = 'tag-vi';
+      else if (lower.includes('bsnl')) colorClass = 'tag-bsnl';
+      else if (lower.includes('raw')) colorClass = 'tag-raw';
 
-      tag.textContent = `${name}: ${count}`;
+      tag.classList.add(colorClass);
+      tag.innerHTML = `<span>${name}</span> <span class="tag-count">${count}</span>`;
       container.appendChild(tag);
     });
   }
@@ -161,48 +269,36 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderTable(towers) {
     towersBodyEl.innerHTML = '';
 
-    const filter = (searchInput.value || '').trim().toLowerCase();
-    const isRaw = rawModeToggle.checked;
-
-    const filtered = towers.filter(t => {
-      if (!filter) return true;
-      return (
-        (t.operator && t.operator.toLowerCase().includes(filter)) ||
-        (t.site_id && t.site_id.toLowerCase().includes(filter)) ||
-        (t.technology && t.technology.toLowerCase().includes(filter))
-      );
-    });
-
-    if (filtered.length === 0) {
-      towersBodyEl.innerHTML = `<tr><td colspan="5" class="empty-state">${
-        filter ? 'No towers match your search.' : 'No towers captured yet.'
-      }</td></tr>`;
+    if (towers.length === 0) {
+      towersBodyEl.innerHTML = '<tr><td colspan="5" class="empty-state">No towers captured yet.</td></tr>';
       return;
     }
 
-    const preview = filtered.slice(0, 50);
+    const preview = towers.slice(0, 100);
     preview.forEach(t => {
       const tr = document.createElement('tr');
-      const opDisplay = isRaw ? '<em class="text-slate-500">null</em>' : escapeHtml(t.operator || 'Unknown');
-      const techDisplay = isRaw ? '<em class="text-slate-500">null</em>' : escapeHtml(t.technology || '4G');
+      const op = t.operator || 'Raw Loc';
+      const tech = t.technology || '—';
+      const sid = t.site_id || '—';
+      const coords = `${t.latitude ? t.latitude.toFixed(4) : ''}, ${t.longitude ? t.longitude.toFixed(4) : ''}`;
+      const type = t.tower_type || 'Rooftop';
+
+      let opDotClass = 'dot-other';
+      const opL = op.toLowerCase();
+      if (opL.includes('airtel')) opDotClass = 'dot-airtel';
+      else if (opL.includes('jio')) opDotClass = 'dot-jio';
+      else if (opL.includes('vi')) opDotClass = 'dot-vi';
+      else if (opL.includes('bsnl')) opDotClass = 'dot-bsnl';
 
       tr.innerHTML = `
-        <td><strong>${opDisplay}</strong></td>
-        <td>${techDisplay}</td>
-        <td title="${escapeHtml(t.site_id || '')}">${escapeHtml(t.site_id || 'N/A')}</td>
-        <td>${t.latitude ? t.latitude.toFixed(4) : '-'}, ${t.longitude ? t.longitude.toFixed(4) : '-'}</td>
-        <td>${escapeHtml(t.tower_type || 'Rooftop')}</td>
+        <td><span class="operator-dot ${opDotClass}"></span>${op}</td>
+        <td><span class="tech-pill">${tech}</span></td>
+        <td class="font-mono">${sid}</td>
+        <td class="font-mono">${coords}</td>
+        <td><span class="badge-type">${type}</span></td>
       `;
       towersBodyEl.appendChild(tr);
     });
-  }
-
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
   }
 
   function triggerDownload(content, filename, mimeType) {
@@ -217,61 +313,95 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(url);
   }
 
-  searchInput.addEventListener('input', () => {
-    renderTable(allTowers);
-  });
-
-  rawModeToggle.addEventListener('change', () => {
-    renderTable(allTowers);
-  });
-
-  // Use visible map view
-  if (btnPopupUseView) {
-    btnPopupUseView.addEventListener('click', async () => {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.id) return;
-      chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_POPULATE_VIEWPORT' }, () => {
-        setTimeout(() => {
-          chrome.runtime.sendMessage({ action: 'GET_SCAN_STATUS' }, scan => {
-            if (scan && scan.startLat) {
-              popupStartLat.value = scan.startLat;
-              popupStartLng.value = scan.startLng;
-              popupEndLat.value = scan.endLat;
-              popupEndLng.value = scan.endLng;
-              updatePopupSlideCount();
-            }
-          });
-        }, 350);
-      });
+  // ── Search filter ──────────────────────────────────────────────────────────
+  searchInput.addEventListener('input', e => {
+    const q = e.target.value.toLowerCase().trim();
+    if (!q) {
+      renderUI(allTowers);
+      return;
+    }
+    const filtered = allTowers.filter(t => {
+      return (
+        (t.site_id && t.site_id.toLowerCase().includes(q)) ||
+        (t.operator && t.operator.toLowerCase().includes(q)) ||
+        (t.technology && t.technology.toLowerCase().includes(q)) ||
+        (t.tower_type && t.tower_type.toLowerCase().includes(q)) ||
+        (t.address && t.address.toLowerCase().includes(q))
+      );
     });
-  }
+    renderUI(filtered);
+  });
 
-  // Toggle Auto-Scan
+  // ── "Use Map View" button in Coords Tab ─────────────────────────────────────
+  btnPopupUseView.addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url || !tab.url.includes('tarangsanchar.gov.in')) {
+      alert('Please switch to the Tarang Sanchar tab to capture viewport coordinates.');
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_POPULATE_VIEWPORT' }, () => {
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ action: 'GET_SCAN_STATUS' }, scan => {
+          if (scan) updateScanUI(scan);
+        });
+      }, 300);
+    });
+  });
+
+  // ── Toggle Auto-Scan (District or Coords) ───────────────────────────────────
   btnToggleScan.addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.url || !tab.url.includes('tarangsanchar.gov.in')) {
-      alert('Please switch to the Tarang Sanchar tab to start or resume Auto-Scan.');
+      alert('Please navigate to https://tarangsanchar.gov.in before starting Auto-Scan.');
       return;
     }
 
-    // Check current scan status
     chrome.runtime.sendMessage({ action: 'GET_SCAN_STATUS' }, scan => {
       if (scan && scan.isScanning) {
+        // Pause scan
         chrome.runtime.sendMessage({ action: 'PAUSE_SCAN' }, () => {
           loadData();
         });
+        return;
+      }
+
+      // Start or Resume scan
+      if (currentScanMode === 'district') {
+        const state = popupStateSelect.value;
+        const district = popupDistrictSelect.value;
+        if (!district) {
+          alert('Please select a district.');
+          return;
+        }
+
+        chrome.runtime.sendMessage(
+          {
+            action: 'START_DISTRICT_SCAN',
+            state,
+            district,
+            fastLocationsOnly: true
+          },
+          res => {
+            if (res && res.success) {
+              loadData();
+              chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_RESUME_SCAN_LOOP' }, () => {});
+            } else {
+              alert(res?.error || 'Failed to start district scan.');
+            }
+          }
+        );
       } else {
+        // Coords mode
         const sLat = parseFloat(popupStartLat.value);
         const sLng = parseFloat(popupStartLng.value);
         const eLat = parseFloat(popupEndLat.value);
         const eLng = parseFloat(popupEndLng.value);
 
         if (isNaN(sLat) || isNaN(sLng) || isNaN(eLat) || isNaN(eLng)) {
-          alert('Please enter Start and End coordinates or click "Use Map View" first!');
+          alert('Please provide Start (SW) and End (NE) coordinates or click "Use Map View" first!');
           return;
         }
 
-        // Start or Resume scan
         chrome.runtime.sendMessage(
           {
             action: 'START_OR_RESUME_SCAN',
@@ -283,7 +413,6 @@ document.addEventListener('DOMContentLoaded', () => {
           res => {
             if (res && res.success) {
               loadData();
-              // Trigger active tab content loop
               chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_RESUME_SCAN_LOOP' }, () => {});
             }
           }
@@ -292,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Reset Scan
+  // ── Reset Scan ─────────────────────────────────────────────────────────────
   btnResetScan.addEventListener('click', () => {
     if (confirm('Stop Auto-Scan and reset progress grid?')) {
       chrome.runtime.sendMessage({ action: 'RESET_SCAN' }, () => {
@@ -301,41 +430,69 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Export RAW CSV (Locations & Types Only, Null Operator & Band)
+  // ── Export RAW CSV (Fast Locations & Types, Null Operator/Band) ────────────
   btnExportRawCsv.addEventListener('click', () => {
     chrome.runtime.sendMessage({ action: 'GET_RAW_CSV' }, response => {
       if (!response || !response.csv) {
-        alert('No towers captured yet. Start Auto-Scan or pan the map on Tarang Sanchar first!');
+        alert('No towers captured yet. Start Fast District Fetch or pan the map on Tarang Sanchar first!');
         return;
       }
+      const dist = popupDistrictSelect ? popupDistrictSelect.value : 'district';
       const dateStr = new Date().toISOString().slice(0, 10);
-      triggerDownload(response.csv, `tarangsanchar_raw_locations_${dateStr}.csv`, 'text/csv;charset=utf-8;');
+      triggerDownload(response.csv, `tarangsanchar_raw_${dist}_${dateStr}.csv`, 'text/csv;charset=utf-8;');
     });
   });
 
-  // Export Full CSV (With Operators & Bands)
+  // ── Export Full CSV (With Operators & Bands) ───────────────────────────────
   btnExportCsv.addEventListener('click', () => {
     if (allTowers.length === 0) {
       alert('No towers captured yet. Start Auto-Scan or pan the map on Tarang Sanchar first!');
       return;
     }
+    const dist = popupDistrictSelect ? popupDistrictSelect.value : 'towers';
     const csv = window.TarangParser.towersToCSV(allTowers);
     const dateStr = new Date().toISOString().slice(0, 10);
-    triggerDownload(csv, `tarangsanchar_full_towers_${dateStr}.csv`, 'text/csv;charset=utf-8;');
+    triggerDownload(csv, `tarangsanchar_full_${dist}_${dateStr}.csv`, 'text/csv;charset=utf-8;');
   });
 
-  // Export JSON
+  // ── Export JSON ────────────────────────────────────────────────────────────
   btnExportJson.addEventListener('click', () => {
     if (allTowers.length === 0) {
       alert('No towers captured yet. Start Auto-Scan or pan the map on Tarang Sanchar first!');
       return;
     }
+    const dist = popupDistrictSelect ? popupDistrictSelect.value : 'towers';
     const jsonStr = window.TarangParser.towersToJSON(allTowers);
     const dateStr = new Date().toISOString().slice(0, 10);
-    triggerDownload(jsonStr, `tarangsanchar_towers_${dateStr}.json`, 'application/json;charset=utf-8;');
+    triggerDownload(jsonStr, `tarangsanchar_${dist}_${dateStr}.json`, 'application/json;charset=utf-8;');
   });
 
-  // Clear data
+  // ── Direct 1-Click Push to Nexus RF Engine (localhost:8000) ────────────────
+  btnPushNexus.addEventListener('click', () => {
+    if (allTowers.length === 0) {
+      alert('No captured towers to push! Run Fast Fetch first.');
+      return;
+    }
+
+    btnPushNexus.textContent = 'Pushing…';
+    btnPushNexus.disabled = true;
+
+    chrome.runtime.sendMessage({ action: 'PUSH_TO_NEXUS_RF', apiUrl: 'http://127.0.0.1:8000/api/import' }, res => {
+      btnPushNexus.disabled = false;
+      if (res && res.success) {
+        btnPushNexus.textContent = '✅ Pushed!';
+        alert(`Successfully imported ${res.count} tower sites directly into Nexus RF!`);
+        setTimeout(() => {
+          btnPushNexus.textContent = '🚀 Push to App';
+        }, 3000);
+      } else {
+        btnPushNexus.textContent = '🚀 Push to App';
+        alert(`Could not push to local Nexus RF: ${res?.error || 'Make sure Nexus RF backend is running on http://127.0.0.1:8000'}`);
+      }
+    });
+  });
+
+  // ── Clear data ─────────────────────────────────────────────────────────────
   btnClear.addEventListener('click', () => {
     if (confirm('Clear all captured sites and reset scan progress?')) {
       chrome.runtime.sendMessage({ action: 'CLEAR_TOWERS' }, () => {
@@ -349,7 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Auto-enrich details
+  // ── Auto-enrich details ───────────────────────────────────────────────────
   let isEnriching = false;
   btnFetchDetails.addEventListener('click', async () => {
     if (isEnriching) return;

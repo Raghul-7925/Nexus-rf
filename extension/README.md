@@ -20,15 +20,19 @@ A Manifest V3 browser extension built specifically to capture, normalize, and ex
     | 🟢 **Green** | `Shop`, `Ground`, `Hotel`, `School`, `Tower` | **Ground** | 35.0 m | 43 dBm (20W) |
     | 🩷 **Pink** | `Cafe`, `Restaurant`, `Wall` | **WallMount** | 12.0 m | 37 dBm (5W) |
 - **Multi-Operator & Multi-Technology Aware**: Captures co-located operators (e.g. Jio 4G/5G, Airtel 2G/4G/5G, Vi, BSNL) sharing the exact same physical structure and coordinates without dropping or overwriting cells.
-- **🛰 Auto-Grid Scanner (Slide by Slide)**: Automatically generates a sliding bounding-box grid across your city, fetching tower locations slide-by-slide with a polite 750ms delay.
+- **🏛 District-Wise Automated Fast Fetcher**: Select any Indian State (Tamil Nadu, Karnataka, Maharashtra, Delhi NCR, etc.) and District (Villupuram, Chennai, Coimbatore, Madurai, Bengaluru, Mumbai, Pune, etc.). The extension automatically computes the exact geographic bounding box and launches a snake-sweep grid scanner across the entire district!
+- **⚡ Fast Tower Locations Only Mode**: High-throughput scanning that queries pure cellular tower coordinates and structure types directly (`GetLocations`), skipping slow per-tower detail requests. Scans up to 10× faster (~200ms per slide) without getting stuck or cut off at slide 36.
+- **🚀 1-Click Direct Push to Nexus RF**: Send captured towers directly into your running Nexus RF web app (`http://127.0.0.1:8000/api/import`) with a single click, instantly rendering live tower markers on the GIS map.
+- **🛰 Auto-Grid Scanner (Custom Bounds)**: Alternatively specify custom Start (SW) and End (NE) coordinates or click "Use Map View" / "Pick on Map" to sweep any custom polygon or area.
 - **🔁 Persistent Resume**: Saves scan progress in `chrome.storage.local`. If you pause, reload, or navigate away, clicking **Resume Scan** continues right where it left off, skipping already scanned slides.
 - **⚡ Raw Mode**: Export pure tower locations and physical types (`Rooftop`, `Ground`, `WallMount`) with empty/null operator and frequency bands for fast large-scale topology mapping.
-- **In-Page Floating HUD**: A discreet floating widget on `tarangsanchar.gov.in` displaying live captured tower counts, scanner status, and instant download buttons.
+- **In-Page Floating HUD**: A discreet floating widget on `tarangsanchar.gov.in` displaying live captured tower counts, district selector, scanner status, and instant download/push buttons.
 - **Extension Popup UI**:
   - Live Auto-Scan progress bar and Start/Pause/Resume buttons.
+  - State & District dropdowns + instant search.
   - Raw Mode toggle.
   - Breakdown by operator (Airtel, Jio, Vi, BSNL) and technology.
-  - Instant **Export Raw CSV** and **Export Full CSV**.
+  - Instant **Export Raw CSV**, **Export Full CSV**, and **Push to App**.
 
 ---
 

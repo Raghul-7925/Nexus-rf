@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useCallback, useRef } from 'react';
 import Map, { NavigationControl, Marker, Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Tower, SimulateResponse } from '../types';
+import { Tower, SimulateResponse, SimulateMultiResponse } from '../types';
 import {
   Eye, EyeOff, Upload, Locate, Trash2, Layers,
-  Maximize2, Minimize2, Crosshair, CheckSquare, Square, Sparkles
+  Maximize2, Minimize2, Crosshair, CheckSquare, Square, Sparkles, Zap
 } from 'lucide-react';
 import { towerAPI } from '../services/api';
 
@@ -199,8 +199,10 @@ interface MapViewProps {
   towers: Tower[];
   simulationResult?: SimulateResponse | null;
   simulationResults?: SimulateResponse[] | null;
+  multiSimData?: SimulateMultiResponse | null;
   onLocationSelect: (lat: number, lng: number) => void;
   onSiteSelect?: (towers: Tower[], switchToSim?: boolean) => void;
+  onAddSiteToMultiSim?: (towers: Tower[]) => void;
   onImportClick?: () => void;
   onTowersChanged?: () => void;
   isSidebarOpen?: boolean;
@@ -209,7 +211,8 @@ interface MapViewProps {
 
 type SourceFilter = 'all' | 'real' | 'test';
 
-function getSiteSource(towers: Tower[]): 'rf_planned' | 'user_test' | 'tarangsanchar' {
+function getSiteSource(towers: Tower[]): 'rf_planned' | 'user_test' | 'tarangsanchar' | 'netmonster' {
+  if (towers.some(t => t.source === 'netmonster_verified' || t.source === 'import_enriched')) return 'netmonster';
   if (towers.some(t => t.source === 'rf_planned')) return 'rf_planned';
   if (towers.some(t => t.source === 'user_test' || t.source === 'manual')) return 'user_test';
   return 'tarangsanchar';
@@ -219,8 +222,10 @@ export const MapView: React.FC<MapViewProps> = ({
   towers,
   simulationResult,
   simulationResults,
+  multiSimData,
   onLocationSelect,
   onSiteSelect,
+  onAddSiteToMultiSim,
   onImportClick,
   onTowersChanged,
   isSidebarOpen = true,
@@ -238,6 +243,11 @@ export const MapView: React.FC<MapViewProps> = ({
   // Multi-carrier layer toggles and opacity
   const [enabledLayers, setEnabledLayers] = useState<Record<number, boolean>>({});
   const [layerOpacity, setLayerOpacity] = useState(0.75);
+
+  // Multi-Tower Simulation overlays toggles
+  const [showComposite, setShowComposite] = useState(true);
+  const [showOverlap, setShowOverlap] = useState(true);
+  const [showDeadzone, setShowDeadzone] = useState(true);
 
   // Live mouse hover point inspection state
   const [inspectPoint, setInspectPoint] = useState<{
@@ -291,7 +301,7 @@ export const MapView: React.FC<MapViewProps> = ({
       }))
       .filter(site => {
         if (sourceFilter === 'all') return true;
-        if (sourceFilter === 'real') return site.source === 'tarangsanchar';
+        if (sourceFilter === 'real') return site.source === 'tarangsanchar' || site.source === 'netmonster';
         if (sourceFilter === 'test') return site.source === 'rf_planned' || site.source === 'user_test';
         return true;
       });
@@ -449,11 +459,74 @@ export const MapView: React.FC<MapViewProps> = ({
           );
         })}
 
+        {/* ── Multi-Site Composite Best-Server Coverage Overlay ──────── */}
+        {multiSimData?.composite_png_base64 && multiSimData.composite_bounds && showComposite && (
+          <Source
+            id="multi-sim-composite-src"
+            type="image"
+            url={`data:image/png;base64,${multiSimData.composite_png_base64}`}
+            coordinates={[
+              [multiSimData.composite_bounds[1], multiSimData.composite_bounds[2]],
+              [multiSimData.composite_bounds[3], multiSimData.composite_bounds[2]],
+              [multiSimData.composite_bounds[3], multiSimData.composite_bounds[0]],
+              [multiSimData.composite_bounds[1], multiSimData.composite_bounds[0]],
+            ]}
+          >
+            <Layer
+              id="multi-sim-composite-layer"
+              type="raster"
+              paint={{ 'raster-opacity': layerOpacity }}
+            />
+          </Source>
+        )}
+
+        {/* ── Multi-Site Overlapping / Handover Interference Zone Overlay ── */}
+        {multiSimData?.overlap_png_base64 && multiSimData.composite_bounds && showOverlap && (
+          <Source
+            id="multi-sim-overlap-src"
+            type="image"
+            url={`data:image/png;base64,${multiSimData.overlap_png_base64}`}
+            coordinates={[
+              [multiSimData.composite_bounds[1], multiSimData.composite_bounds[2]],
+              [multiSimData.composite_bounds[3], multiSimData.composite_bounds[2]],
+              [multiSimData.composite_bounds[3], multiSimData.composite_bounds[0]],
+              [multiSimData.composite_bounds[1], multiSimData.composite_bounds[0]],
+            ]}
+          >
+            <Layer
+              id="multi-sim-overlap-layer"
+              type="raster"
+              paint={{ 'raster-opacity': 0.85 }}
+            />
+          </Source>
+        )}
+
+        {/* ── Multi-Site Deadzone / Coverage Holes Overlay ────────────── */}
+        {multiSimData?.deadzone_png_base64 && multiSimData.composite_bounds && showDeadzone && (
+          <Source
+            id="multi-sim-deadzone-src"
+            type="image"
+            url={`data:image/png;base64,${multiSimData.deadzone_png_base64}`}
+            coordinates={[
+              [multiSimData.composite_bounds[1], multiSimData.composite_bounds[2]],
+              [multiSimData.composite_bounds[3], multiSimData.composite_bounds[2]],
+              [multiSimData.composite_bounds[3], multiSimData.composite_bounds[0]],
+              [multiSimData.composite_bounds[1], multiSimData.composite_bounds[0]],
+            ]}
+          >
+            <Layer
+              id="multi-sim-deadzone-layer"
+              type="raster"
+              paint={{ 'raster-opacity': 0.85 }}
+            />
+          </Source>
+        )}
+
         {/* ── High-Performance Viewport-Culled Tower Markers ───────────── */}
         {showTowers && visibleSites.map(site => {
           const color = towerTypeColor(site.tower_type);
           const isHovered = hoveredSite === site.site_id;
-          const badge = site.source === 'rf_planned' ? '🛠️' : site.source === 'user_test' ? '🧪' : undefined;
+          const badge = site.source === 'rf_planned' ? '🛠️' : site.source === 'user_test' ? '🧪' : (site.source === 'netmonster' ? '📱' : undefined);
           return (
             <React.Fragment key={site.site_id}>
               <Marker
@@ -478,90 +551,125 @@ export const MapView: React.FC<MapViewProps> = ({
                   anchor="bottom"
                   offset={24}
                   closeButton={false}
-                  className="z-50 min-w-[250px]"
+                  className="z-50 min-w-[280px] max-w-sm"
                 >
-                  <div className="p-2 text-slate-800 text-sm" onMouseLeave={() => !confirmDelete && setHoveredSite(null)}>
+                  <div className="p-2.5 text-slate-800 text-sm" onMouseLeave={() => !confirmDelete && setHoveredSite(null)}>
                     {/* Header */}
-                    <div className="flex items-start justify-between gap-2 border-b border-slate-200 pb-1.5 mb-1.5">
+                    <div className="flex items-start justify-between gap-2 border-b border-slate-200 pb-2 mb-2">
                       <div>
-                        <div className="font-bold text-base leading-tight">
+                        <div className="font-bold text-base leading-tight text-slate-900">
                           {site.towers[0].site_id || site.towers[0].name}
                         </div>
-                        <div className="text-xs text-slate-500 capitalize">
+                        {site.towers[0].location_name && (
+                          <div className="text-xs text-indigo-700 font-semibold mt-0.5 flex items-center gap-1">
+                            📍 {site.towers[0].location_name}
+                          </div>
+                        )}
+                        <div className="text-[11px] text-slate-500 capitalize mt-0.5">
                           {site.tower_type} · {site.lat.toFixed(5)}, {site.lng.toFixed(5)}
                         </div>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          {site.source === 'rf_planned' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-700 border border-purple-200">
-                              🛠️ Planned Site
-                            </span>
-                          )}
-                          {site.source === 'user_test' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                              🧪 Test Site
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          {site.source === 'netmonster' && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-sm flex items-center gap-1">
+                              📱 Source: netmonster Database
                             </span>
                           )}
                           {site.source === 'tarangsanchar' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                              🏛 Official Baseline
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                              🏛 Source: TarangSanchar Baseline
+                            </span>
+                          )}
+                          {site.source === 'user_test' && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              🧪 Source: User Test Site
+                            </span>
+                          )}
+                          {site.source === 'rf_planned' && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200">
+                              🛠️ Source: RF Planned Site
                             </span>
                           )}
                         </div>
                       </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); setConfirmDelete(site.site_id); }}
-                        className="text-red-400 hover:text-red-600 mt-0.5 flex-shrink-0"
+                        className="text-red-400 hover:text-red-600 mt-0.5 flex-shrink-0 p-1 rounded hover:bg-red-50"
                         title="Delete site"
                       >
                         <Trash2 size={15} />
                       </button>
                     </div>
 
-                    {/* Radio Cells list */}
-                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                    {/* Radio Cells Telemetry list */}
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
                       {site.towers.map(t => (
-                        <div key={t.id} className="flex items-center gap-1.5 text-xs py-0.5 border-b border-slate-100 last:border-none">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: opColor(t.operator) }}
-                          />
-                          <span className="font-semibold text-slate-800">
-                            {t.operator || 'Unconfigured'}
-                          </span>
-                          {t.technology && (
-                            <span className="text-[10px] bg-slate-100 px-1 py-0.2 rounded text-slate-600">
-                              {t.technology}
+                        <div key={t.id} className="p-1.5 bg-slate-50 rounded border border-slate-200/90 text-xs space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: opColor(t.operator) }}
+                            />
+                            <span className="font-bold text-slate-800">
+                              {t.operator || 'Unconfigured'}
                             </span>
-                          )}
-                          <span className="ml-auto font-mono text-slate-600 text-[11px]">
-                            {t.freq_mhz != null ? `${t.freq_mhz} MHz` : 'Raw Loc'}
-                          </span>
+                            {t.technology && (
+                              <span className="text-[10px] bg-slate-200 px-1 py-0.2 rounded font-mono text-slate-700 font-semibold">
+                                {t.technology}
+                              </span>
+                            )}
+                            <span className="ml-auto font-mono text-indigo-700 font-bold text-[11px]">
+                              {t.freq_mhz != null ? `${t.freq_mhz} MHz` : 'Raw Loc'}
+                            </span>
+                          </div>
+
+                          {/* Full Cellular Telemetry Grid (CID, PCI, Area, Channel) */}
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] font-mono text-slate-600 bg-white p-1 rounded border border-slate-100">
+                            <div><span className="text-slate-400">CID:</span> <strong className="text-slate-700">{t.cell_id || 'N/A'}</strong></div>
+                            <div><span className="text-slate-400">PCI:</span> <strong className="text-slate-700">{t.pci || 'N/A'}</strong></div>
+                            <div><span className="text-slate-400">Area/LAC:</span> <strong className="text-slate-700">{t.area || 'N/A'}</strong></div>
+                            <div><span className="text-slate-400">Channel:</span> <strong className="text-slate-700">{t.channel ? `CH ${t.channel}` : 'N/A'}</strong></div>
+                          </div>
                         </div>
                       ))}
                     </div>
 
-                    {/* Actions: Edit vs Simulate */}
-                    <div className="mt-2.5 flex gap-1.5 border-t border-slate-200 pt-1.5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSiteSelect?.(site.towers, false); // false = Edit Mode!
-                          setHoveredSite(null);
-                        }}
-                        className="flex-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded px-2 py-1.5 font-medium flex items-center justify-center gap-1 border border-indigo-200 shadow-sm"
-                      >
-                        ✏ Edit Site & Cells
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSiteSelect?.(site.towers, true); // true = Simulate Mode!
-                          setHoveredSite(null);
-                        }}
-                        className="flex-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded px-2 py-1.5 font-medium flex items-center justify-center gap-1 shadow-sm"
-                      >
-                        📡 Simulate
-                      </button>
+                    {/* Actions: Edit, Simulate, and Multi-Tower Sim */}
+                    <div className="mt-2.5 flex flex-col gap-1.5 border-t border-slate-200 pt-2">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSiteSelect?.(site.towers, false);
+                            setHoveredSite(null);
+                          }}
+                          className="flex-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded px-2 py-1.5 font-medium flex items-center justify-center gap-1 border border-indigo-200 shadow-sm"
+                        >
+                          ✏ Edit Site & Cells
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSiteSelect?.(site.towers, true);
+                            setHoveredSite(null);
+                          }}
+                          className="flex-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded px-2 py-1.5 font-medium flex items-center justify-center gap-1 shadow-sm"
+                        >
+                          📡 Simulate Site
+                        </button>
+                      </div>
+
+                      {onAddSiteToMultiSim && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddSiteToMultiSim(site.towers);
+                            setHoveredSite(null);
+                          }}
+                          className="w-full text-xs bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded px-2 py-1.5 font-semibold flex items-center justify-center gap-1.5 shadow"
+                        >
+                          <Zap size={13} className="text-amber-300" /> + Add to Multi-Tower Sim
+                        </button>
+                      )}
                     </div>
 
                     {confirmDelete === site.site_id && (
@@ -592,13 +700,13 @@ export const MapView: React.FC<MapViewProps> = ({
       </Map>
 
       {/* ── Top Floating Toolbar ────────────────────────────────────── */}
-      <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 max-w-[calc(100%-140px)]">
+      <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 max-w-[calc(100vw-80px)] sm:max-w-[calc(100%-140px)]">
         {onImportClick && (
           <button
             onClick={onImportClick}
-            className="bg-slate-800/90 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded shadow flex items-center gap-1.5 border border-slate-700 text-xs font-medium"
+            className="bg-slate-800/90 hover:bg-slate-700 text-white px-2 sm:px-2.5 py-1.5 rounded shadow flex items-center gap-1 sm:gap-1.5 border border-slate-700 text-xs font-medium"
           >
-            <Upload size={13} /> Import
+            <Upload size={13} /> <span className="hidden sm:inline">Import</span>
           </button>
         )}
 
@@ -606,25 +714,25 @@ export const MapView: React.FC<MapViewProps> = ({
           onClick={handleLocate}
           disabled={locating}
           title="Go to my location"
-          className="bg-slate-800/90 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded shadow flex items-center gap-1.5 border border-slate-700 text-xs font-medium disabled:opacity-60"
+          className="bg-slate-800/90 hover:bg-slate-700 text-white px-2 sm:px-2.5 py-1.5 rounded shadow flex items-center gap-1 sm:gap-1.5 border border-slate-700 text-xs font-medium disabled:opacity-60"
         >
           <Locate size={13} className={locating ? 'animate-spin' : ''} />
-          {locating ? 'Locating…' : 'My Location'}
+          <span className="hidden sm:inline">{locating ? 'Locating…' : 'My Location'}</span>
         </button>
 
         <button
           onClick={() => setShowTowers(v => !v)}
-          className="bg-slate-800/90 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded shadow flex items-center gap-1.5 border border-slate-700 text-xs font-medium"
+          className="bg-slate-800/90 hover:bg-slate-700 text-white px-2 sm:px-2.5 py-1.5 rounded shadow flex items-center gap-1 sm:gap-1.5 border border-slate-700 text-xs font-medium"
         >
           {showTowers ? <Eye size={13} /> : <EyeOff size={13} />}
-          {visibleSites.length} / {sites.length} Sites
+          <span>{visibleSites.length} Sites</span>
         </button>
 
         {/* Source Filter Switcher */}
         <div className="flex items-center bg-slate-900/90 backdrop-blur rounded p-0.5 border border-slate-700 text-xs shadow">
           <button
             onClick={() => setSourceFilter('all')}
-            className={`px-2 py-1 rounded transition-colors text-[11px] font-medium ${
+            className={`px-2 py-1 rounded transition-colors text-[10px] sm:text-[11px] font-medium ${
               sourceFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
             }`}
           >
@@ -632,7 +740,7 @@ export const MapView: React.FC<MapViewProps> = ({
           </button>
           <button
             onClick={() => setSourceFilter('real')}
-            className={`px-2 py-1 rounded transition-colors text-[11px] font-medium ${
+            className={`px-2 py-1 rounded transition-colors text-[10px] sm:text-[11px] font-medium ${
               sourceFilter === 'real' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
             }`}
             title="Show only official Tarang Sanchar baseline towers"
@@ -641,19 +749,19 @@ export const MapView: React.FC<MapViewProps> = ({
           </button>
           <button
             onClick={() => setSourceFilter('test')}
-            className={`px-2 py-1 rounded transition-colors text-[11px] font-medium ${
+            className={`px-2 py-1 rounded transition-colors text-[10px] sm:text-[11px] font-medium ${
               sourceFilter === 'test' ? 'bg-purple-600 text-white' : 'text-slate-300 hover:text-white'
             }`}
             title="Show user test & RF planned towers"
           >
-            🧪 Test/Plan
+            🧪 Test
           </button>
         </div>
       </div>
 
       {/* ── Fullscreen Map Toggle Button (Requirement 3) ──────────────── */}
       {onToggleSidebar && (
-        <div className="absolute top-3 right-3 z-10">
+        <div className="absolute top-3 right-3 z-10 hidden sm:block">
           <button
             onClick={onToggleSidebar}
             title={isSidebarOpen ? 'Collapse side panel (Full screen GIS)' : 'Show side panel'}
@@ -667,7 +775,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
       {/* ── Interactive Live Mouse Hover Point Inspector (Requirement 6) ─ */}
       {inspectPoint && (
-        <div className="absolute top-14 right-3 z-20 bg-slate-900/95 backdrop-blur border border-slate-700 text-white p-3 rounded-xl shadow-2xl min-w-[270px] pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute top-14 right-2 sm:right-3 left-2 sm:left-auto z-20 bg-slate-900/95 backdrop-blur border border-slate-700 text-white p-3 rounded-xl shadow-2xl min-w-[260px] max-w-[calc(100vw-16px)] sm:max-w-sm pointer-events-none animate-in fade-in zoom-in-95 duration-100">
           <div className="flex items-center justify-between border-b border-slate-700/80 pb-2 mb-2">
             <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-400">
               <Crosshair size={14} />
@@ -733,8 +841,75 @@ export const MapView: React.FC<MapViewProps> = ({
         </div>
       )}
 
+      {/* ── Multi-Tower Simulation Overlap & Deadzone Controller ─────── */}
+      {multiSimData && (
+        <div className="absolute top-14 left-3 z-20 bg-slate-900/95 backdrop-blur text-xs p-3 rounded-xl shadow-2xl border border-indigo-500/60 text-slate-200 min-w-[260px] max-w-xs space-y-2">
+          <div className="flex items-center justify-between font-bold text-white pb-1.5 border-b border-slate-700">
+            <span className="flex items-center gap-1.5 text-indigo-400">
+              <Zap size={14} className="text-amber-400" /> Multi-Tower Overlap & Deadzones
+            </span>
+            <span className="text-[10px] bg-indigo-900 text-indigo-300 px-1.5 py-0.5 rounded font-mono">
+              {multiSimData.towers_count} Cells
+            </span>
+          </div>
+
+          {/* Quick Metrics */}
+          <div className="grid grid-cols-2 gap-1.5 text-[11px] bg-slate-800/80 p-2 rounded border border-slate-700 font-mono">
+            <div>
+              <span className="text-[10px] text-slate-400 block font-sans">⚡ Overlap Zone</span>
+              <strong className="text-purple-300">{multiSimData.overlap_area_km2 ?? 0} km²</strong>
+              <span className="text-[10px] text-slate-400 ml-1">({multiSimData.overlap_percentage ?? 0}%)</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 block font-sans">🕳 Deadzones</span>
+              <strong className="text-red-400">{multiSimData.deadzone_area_km2 ?? 0} km²</strong>
+            </div>
+            <div className="col-span-2 pt-1 border-t border-slate-700/60">
+              <span className="text-[10px] text-slate-400 font-sans">Total Coverage: </span>
+              <strong className="text-emerald-400">{multiSimData.total_coverage_km2 ?? 0} km²</strong>
+            </div>
+          </div>
+
+          {/* Layer Checkboxes */}
+          <div className="space-y-1 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800">
+              <input
+                type="checkbox"
+                checked={showComposite}
+                onChange={e => setShowComposite(e.target.checked)}
+                className="accent-indigo-500 rounded"
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+              <span>Composite Coverage</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800">
+              <input
+                type="checkbox"
+                checked={showOverlap}
+                onChange={e => setShowOverlap(e.target.checked)}
+                className="accent-purple-500 rounded"
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
+              <span>Overlap & Interference (Magenta)</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-slate-800">
+              <input
+                type="checkbox"
+                checked={showDeadzone}
+                onChange={e => setShowDeadzone(e.target.checked)}
+                className="accent-red-500 rounded"
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+              <span>Coverage Holes / Deadzones</span>
+            </label>
+          </div>
+        </div>
+      )}
+
       {/* ── Multi-Carrier Layer Controller (Requirement 5) ───────────── */}
-      {activeSimLayers.length > 1 && (
+      {!multiSimData && activeSimLayers.length > 1 && (
         <div className="absolute top-14 left-3 z-10 bg-slate-900/90 backdrop-blur text-xs p-3 rounded-xl shadow-xl border border-slate-700 text-slate-200 min-w-[240px]">
           <div className="flex items-center justify-between font-bold text-white mb-2 pb-1.5 border-b border-slate-700">
             <span className="flex items-center gap-1.5">
@@ -789,7 +964,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
       {/* ── Single Coverage Legend (when 1 layer active) ──────────────── */}
       {activeSimLayers.length === 1 && (
-        <div className="absolute bottom-20 right-14 z-10 bg-slate-800/95 text-xs p-3 rounded shadow border border-slate-700 text-slate-200 min-w-[210px]">
+        <div className="absolute bottom-32 md:bottom-20 right-2 sm:right-14 z-10 bg-slate-800/95 text-xs p-3 rounded shadow border border-slate-700 text-slate-200 min-w-[210px] max-w-[calc(100vw-16px)]">
           <div className="font-bold mb-1.5 text-white flex items-center justify-between">
             <span>Coverage Prediction</span>
             <span className="text-[10px] text-green-400 font-mono">{activeSimLayers[0].avg_rsrp_dbm} dBm RSRP</span>
@@ -821,14 +996,14 @@ export const MapView: React.FC<MapViewProps> = ({
       )}
 
       {/* ── BOTTOM: Map source switcher ──────────────────────────────── */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
-        <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur rounded-full px-2 py-1 shadow-lg border border-slate-700">
-          <Layers size={12} className="text-slate-400 mr-1" />
+      <div className="absolute bottom-20 md:bottom-3 left-1/2 -translate-x-1/2 z-10 max-w-[96vw] overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-1 bg-slate-900/90 backdrop-blur rounded-full px-2 py-1 shadow-lg border border-slate-700 whitespace-nowrap">
+          <Layers size={12} className="text-slate-400 mr-1 shrink-0" />
           {(['gmap', 'osm', 'satellite', 'terrain', 'dark'] as BaseStyle[]).map(id => (
             <button
               key={id}
               onClick={() => setBaseStyle(id)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              className={`px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-medium transition-colors ${
                 baseStyle === id
                   ? 'bg-indigo-600 text-white'
                   : 'text-slate-300 hover:bg-slate-700'
@@ -841,7 +1016,7 @@ export const MapView: React.FC<MapViewProps> = ({
       </div>
 
       {/* ── Tower legend ─────────────────────────────────────────────── */}
-      <div className="absolute bottom-14 left-3 z-10 bg-slate-800/90 text-[10px] p-2 rounded shadow border border-slate-700 text-slate-300 space-y-0.5">
+      <div className="absolute bottom-32 md:bottom-14 left-2 sm:left-3 z-10 bg-slate-800/90 text-[10px] p-2 rounded shadow border border-slate-700 text-slate-300 space-y-0.5">
         {[['ground','#22c55e','🟢 Ground'],['rooftop','#3b82f6','🔵 Rooftop'],['wall-mount','#ec4899','🩷 Wall-mount']].map(([,c,l])=>(
           <div key={l} className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full" style={{backgroundColor:c as string}}/>

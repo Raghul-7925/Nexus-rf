@@ -47,11 +47,19 @@ export const rfPlanAPI = {
 };
 
 export const importAPI = {
-  importData: async (file: File, format: string): Promise<{ batch_id: string; row_count: number }> => {
+  importData: async (file: File, format: string, snapToBaseline = true): Promise<any> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('format', format);
+    formData.append('snap_to_baseline', String(snapToBaseline));
     return (await api.post('/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
+  },
+  importNetMonster: async (file: File, snapToBaseline = true, snapRadiusM = 1200.0): Promise<any> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('snap_to_baseline', String(snapToBaseline));
+    formData.append('snap_radius_m', String(snapRadiusM));
+    return (await api.post('/import/netmonster', formData, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
   },
 };
 

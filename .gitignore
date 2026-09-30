@@ -45,7 +45,10 @@ yarn-error.log*
 
 # Database & OS
 *.sqlite3
+*.db
 *.db-journal
+*.apk
+*.ntm
 .DS_Store
 Thumbs.db
 desktop.ini

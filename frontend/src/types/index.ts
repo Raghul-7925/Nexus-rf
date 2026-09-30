@@ -14,6 +14,10 @@ export interface Tower {
   source: string;
   cell_id: string | null;
   site_id: string | null;
+  pci?: string | number | null;
+  area?: string | number | null;
+  channel?: number | null;
+  location_name?: string | null;
 }
 
 export type TowerCreate = Omit<Tower, 'id'>;
@@ -75,6 +79,15 @@ export interface SimulateMultiRequest {
 export interface SimulateMultiResponse {
   layers: SimulateResponse[];
   site_id?: string;
+  composite_png_base64?: string | null;
+  overlap_png_base64?: string | null;
+  deadzone_png_base64?: string | null;
+  composite_bounds?: [number, number, number, number] | null;
+  total_coverage_km2?: number | null;
+  overlap_area_km2?: number | null;
+  overlap_percentage?: number | null;
+  deadzone_area_km2?: number | null;
+  towers_count?: number;
 }
 
 export interface CompareRequest {
@@ -84,6 +97,7 @@ export interface CompareRequest {
   sort_by?: string;
   model?: string;
   environment?: string;
+  data_source?: 'verified' | 'test' | 'all';
 }
 
 export interface CompareResultItem {
@@ -101,11 +115,14 @@ export interface CompareResultItem {
   indoor_score?: number;
   verdict?: string | null;
   bands_available: string[];
+  data_source?: string;
 }
 
 export interface CompareResponse {
   results: CompareResultItem[];
+  data_source_mode?: string;
 }
+
 
 export interface RFRecommendedBand {
   band: string;

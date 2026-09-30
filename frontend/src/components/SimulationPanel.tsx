@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Tower, TowerCreate, SimulateResponse } from '../types';
+import { Tower, TowerCreate, SimulateResponse, SimulateMultiResponse } from '../types';
 import { simulateAPI, towerAPI } from '../services/api';
 import {
   Activity, Radio, Loader, Plus, AlertCircle, Save,
-  Edit3, Trash2, CheckCircle2, Sparkles, Layers
+  Edit3, Trash2, CheckCircle2, Sparkles, Layers, Zap, X
 } from 'lucide-react';
 
 // ── Model auto-selection logic ─────────────────────────────────────────────
@@ -11,6 +11,18 @@ function autoModel(freq: number): string {
   if (freq < 1500)  return 'hata';
   if (freq < 6000)  return 'cost231';
   return 'fspl';
+}
+
+function haversineDistKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371.0;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180.0;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180.0;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180.0) *
+      Math.cos((lat2 * Math.PI) / 180.0) *
+      Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 const MODEL_NAMES: Record<string, string> = {
@@ -66,8 +78,10 @@ interface SimulationPanelProps {
   lat: number | null;
   lng: number | null;
   initialMode?: 'simulate' | 'add' | 'edit';
+  multiQueueSites?: Tower[][];
+  onMultiQueueSitesChange?: (sites: Tower[][]) => void;
   onSimulationComplete: (r: SimulateResponse | null) => void;
-  onMultiSimulationComplete?: (results: SimulateResponse[] | null) => void;
+  onMultiSimulationComplete?: (results: SimulateResponse[] | null, multiData?: SimulateMultiResponse | null) => void;
   onTowersChanged?: () => void;
 }
 
@@ -77,6 +91,8 @@ export function SimulationPanel({
   lat,
   lng,
   initialMode = 'simulate',
+  multiQueueSites,
+  onMultiQueueSitesChange,
   onSimulationComplete,
   onMultiSimulationComplete,
   onTowersChanged,
@@ -85,8 +101,16 @@ export function SimulationPanel({
   const [selectedTowerId, setSelectedTowerId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [multiLoading, setMultiLoading] = useState(false);
+  const [multiSitesLoading, setMultiSitesLoading] = useState(false);
   const [result, setResult] = useState<SimulateResponse | null>(null);
   const [multiResults, setMultiResults] = useState<SimulateResponse[] | null>(null);
+  const [multiSimData, setMultiSimData] = useState<SimulateMultiResponse | null>(null);
+  const [localQueue, setLocalQueue] = useState<Tower[][]>([]);
+  const queue = multiQueueSites ?? localQueue;
+  const setQueue = (newQ: Tower[][]) => {
+    setLocalQueue(newQ);
+    onMultiQueueSitesChange?.(newQ);
+  };
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -236,17 +260,138 @@ export function SimulationPanel({
       });
 
       setMultiResults(resp.layers);
+      setMultiSimData(resp);
       if (resp.layers.length > 0) {
         setResult(resp.layers[0]);
         onSimulationComplete(resp.layers[0]);
       }
-      onMultiSimulationComplete?.(resp.layers);
+      onMultiSimulationComplete?.(resp.layers, resp);
       setSuccessMsg(`Simulated ${resp.layers.length} carrier/band layers!`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (e: any) {
       setError(e.response?.data?.detail ?? 'Multi-carrier simulation failed.');
     } finally {
       setMultiLoading(false);
+    }
+  };
+
+  // ── Multi-Tower Simulation Handlers (Requirement: 2+ Sites Overlap & Deadzones) ──
+  const handleQueueCurrentSite = () => {
+    if (!selectedTower) return;
+    const currentSiteTowers = siteMates.length > 0 ? siteMates : [selectedTower];
+    const currentSid = selectedTower.site_id || selectedTower.id;
+
+    if (queue.some((s) => (s[0]?.site_id || s[0]?.id) === currentSid)) {
+      setSuccessMsg('This site is already in the Multi-Tower queue.');
+      setTimeout(() => setSuccessMsg(''), 3000);
+      return;
+    }
+
+    const newQueue = [...queue, currentSiteTowers];
+    setQueue(newQueue);
+    setSuccessMsg(
+      `Added ${selectedTower.location_name ? `📍 ${selectedTower.location_name}` : (selectedTower.site_id || selectedTower.name)} to Multi-Tower queue (${newQueue.length} queued)`
+    );
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleAutoSelectNeighbors = () => {
+    if (!selectedTower) {
+      setError('Select a site first to find nearby neighbors.');
+      return;
+    }
+
+    // Group all towers by site
+    const siteMap = new Map<string, Tower[]>();
+    for (const t of towers) {
+      const sid = t.site_id || t.id;
+      if (!siteMap.has(sid)) {
+        siteMap.set(sid, []);
+      }
+      siteMap.get(sid)!.push(t);
+    }
+
+    const currentSid = selectedTower.site_id || selectedTower.id;
+    const candidates: { sid: string; siteTowers: Tower[]; distKm: number }[] = [];
+
+    for (const [sid, siteTowers] of siteMap.entries()) {
+      if (sid === currentSid) continue;
+      const first = siteTowers[0];
+      const dist = haversineDistKm(selectedTower.lat, selectedTower.lng, first.lat, first.lng);
+      if (dist >= 0.05 && dist <= 4.0) {
+        candidates.push({ sid, siteTowers, distKm: dist });
+      }
+    }
+
+    candidates.sort((a, b) => a.distKm - b.distKm);
+    const chosenNeighbors = candidates.slice(0, 3).map((c) => c.siteTowers);
+
+    if (chosenNeighbors.length === 0) {
+      setError('No neighbor sites found within 4 km of this tower.');
+      return;
+    }
+
+    const currentSiteTowers = siteMates.length > 0 ? siteMates : [selectedTower];
+    const newQueue = [currentSiteTowers];
+    for (const n of chosenNeighbors) {
+      newQueue.push(n);
+    }
+
+    setQueue(newQueue);
+    setSuccessMsg(`Auto-selected ${chosenNeighbors.length} neighbor site(s) within 4 km! (Total: ${newQueue.length} sites in queue)`);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleRemoveFromQueue = (index: number) => {
+    const newQueue = queue.filter((_, i) => i !== index);
+    setQueue(newQueue);
+  };
+
+  const handleClearQueue = () => {
+    setQueue([]);
+  };
+
+  const handleSimulateMultiSites = async () => {
+    if (queue.length < 2) {
+      setError('Please add at least 2 sites to the Multi-Tower queue to analyze overlaps & deadzones.');
+      return;
+    }
+
+    const allTowers = queue.flat();
+    const validTowers = allTowers.filter((t) => t.freq_mhz != null);
+
+    if (validTowers.length < 2) {
+      setError('At least 2 cells in the queued sites must have carrier frequency configured.');
+      return;
+    }
+
+    setError('');
+    setMultiSitesLoading(true);
+    setResult(null);
+    setMultiResults(null);
+    try {
+      const resp = await simulateAPI.simulateMulti({
+        tower_ids: validTowers.map((t) => t.id),
+        resolution: 120,
+        terrain_aware: true,
+        building_aware: true,
+      });
+
+      setMultiResults(resp.layers);
+      setMultiSimData(resp);
+      if (resp.layers.length > 0) {
+        setResult(resp.layers[0]);
+        onSimulationComplete(resp.layers[0]);
+      }
+      onMultiSimulationComplete?.(resp.layers, resp);
+      setSuccessMsg(
+        `Multi-Site Analysis Complete! Overlap: ${resp.overlap_area_km2 ?? 0} km² (${resp.overlap_percentage ?? 0}%), Deadzones: ${resp.deadzone_area_km2 ?? 0} km²`
+      );
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (e: any) {
+      setError(e.response?.data?.detail ?? 'Multi-tower simulation failed.');
+    } finally {
+      setMultiSitesLoading(false);
     }
   };
 
@@ -416,8 +561,9 @@ export function SimulationPanel({
   const handleClear = () => {
     setResult(null);
     setMultiResults(null);
+    setMultiSimData(null);
     onSimulationComplete(null);
-    onMultiSimulationComplete?.(null);
+    onMultiSimulationComplete?.(null, null);
     setError('');
   };
 
@@ -774,25 +920,34 @@ export function SimulationPanel({
                     <h3 className="font-bold text-white text-sm">
                       {selectedTower.site_id || selectedTower.name}
                     </h3>
+                    {selectedTower.location_name && (
+                      <p className="text-xs text-indigo-400 font-semibold flex items-center gap-1 mt-0.5">
+                        📍 {selectedTower.location_name}
+                      </p>
+                    )}
                     <p className="text-[11px] text-slate-400 capitalize">
                       {selectedTower.tower_type || 'Ground'} · {selectedTower.lat.toFixed(5)}, {selectedTower.lng.toFixed(5)}
                     </p>
                   </div>
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded font-mono ${
-                      selectedTower.source === 'rf_planned'
-                        ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700'
-                        : selectedTower.source === 'user_test'
-                        ? 'bg-amber-900/50 text-amber-300 border border-amber-700'
-                        : 'bg-blue-900/50 text-blue-300 border border-blue-700'
-                    }`}
-                  >
-                    {selectedTower.source === 'rf_planned'
-                      ? '🛠 Planned'
-                      : selectedTower.source === 'user_test'
-                      ? '🧪 Test'
-                      : '🏛 Real Tower'}
-                  </span>
+                  <div>
+                    {(selectedTower.source === 'netmonster_verified' || selectedTower.source === 'import_enriched') ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-900/60 text-emerald-300 border border-emerald-600 shadow-sm flex items-center gap-1">
+                        📱 Source: netmonster Database
+                      </span>
+                    ) : selectedTower.source === 'rf_planned' ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-purple-900/50 text-purple-300 border border-purple-700">
+                        🛠 RF Planned
+                      </span>
+                    ) : selectedTower.source === 'user_test' ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-amber-900/50 text-amber-300 border border-amber-700">
+                        🧪 User Test
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-blue-900/50 text-blue-300 border border-blue-700">
+                        🏛 TarangSanchar Baseline
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* If site has multiple cells/operators */}
@@ -807,28 +962,38 @@ export function SimulationPanel({
                         <Edit3 size={11} /> Edit Bands
                       </button>
                     </div>
-                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
                       {siteMates.map((cell) => (
                         <button
                           key={cell.id}
                           onClick={() => setSelectedTowerId(cell.id)}
-                          className={`w-full text-left p-2 rounded text-xs flex items-center justify-between transition-colors border ${
+                          className={`w-full text-left p-2 rounded text-xs transition-colors border space-y-1 ${
                             selectedTowerId === cell.id
                               ? 'bg-indigo-900/40 border-indigo-500 text-white'
                               : 'bg-slate-700/40 border-slate-700 hover:border-slate-600 text-slate-300'
                           }`}
                         >
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className="w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: getOpColor(cell.operator) }}
-                            />
-                            <span className="font-semibold">{cell.operator || 'Unassigned'}</span>
-                            <span className="text-slate-400 text-[10px]">{cell.technology}</span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full"
+                                style={{ backgroundColor: getOpColor(cell.operator) }}
+                              />
+                              <span className="font-semibold">{cell.operator || 'Unassigned'}</span>
+                              <span className="text-slate-400 text-[10px]">{cell.technology}</span>
+                            </div>
+                            <span className="font-mono text-indigo-300 text-[11px]">
+                              {cell.freq_mhz ? `${cell.freq_mhz} MHz` : 'Unconfigured'}
+                            </span>
                           </div>
-                          <span className="font-mono text-indigo-300 text-[11px]">
-                            {cell.freq_mhz ? `${cell.freq_mhz} MHz` : 'Unconfigured'}
-                          </span>
+                          {(cell.cell_id || cell.pci != null || cell.channel != null || cell.area != null) && (
+                            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px] font-mono text-slate-400 bg-slate-900/60 p-1 rounded border border-slate-800/80">
+                              {cell.cell_id && <div>CID: <span className="text-slate-200">{cell.cell_id}</span></div>}
+                              {cell.pci != null && <div>PCI: <span className="text-slate-200">{cell.pci}</span></div>}
+                              {cell.area != null && <div>Area: <span className="text-slate-200">{cell.area}</span></div>}
+                              {cell.channel != null && <div>CH: <span className="text-slate-200">{cell.channel}</span></div>}
+                            </div>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -919,6 +1084,100 @@ export function SimulationPanel({
                 </div>
               </div>
             )}
+
+            {/* ── Multi-Tower / Multi-Site Simulation (Overlap & Deadzone Analysis) ── */}
+            <div className="bg-slate-800/90 p-3.5 rounded-lg border border-purple-800/60 space-y-3">
+              <div className="flex items-center justify-between border-b border-purple-900/60 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <Zap size={14} className="text-amber-400" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wide">
+                    Multi-Tower Simulation ({queue.length} Sites)
+                  </span>
+                </div>
+                {queue.length > 0 && (
+                  <button
+                    onClick={handleClearQueue}
+                    className="text-[10px] text-slate-400 hover:text-red-300 transition-colors"
+                  >
+                    Clear Queue
+                  </button>
+                )}
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-snug">
+                Simulate 2 or more cell sites together to identify <strong>overlapping interference &amp; handover zones</strong> (magenta) and <strong>coverage holes / deadzones</strong> (red).
+              </p>
+
+              {/* Queue actions */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleQueueCurrentSite}
+                  disabled={!selectedTower}
+                  className="bg-indigo-900/50 hover:bg-indigo-900/80 text-indigo-200 border border-indigo-700/60 disabled:opacity-40 py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors"
+                  title="Add the currently selected site to this multi-tower simulation queue"
+                >
+                  <Plus size={12} /> + Add This Site
+                </button>
+                <button
+                  onClick={handleAutoSelectNeighbors}
+                  disabled={!selectedTower}
+                  className="bg-purple-900/50 hover:bg-purple-900/80 text-purple-200 border border-purple-700/60 disabled:opacity-40 py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors"
+                  title="Automatically find and queue 2-3 closest neighbor sites within 1-4 km"
+                >
+                  <Sparkles size={12} className="text-amber-300" /> ⚡ Auto Neighbors (1-4 km)
+                </button>
+              </div>
+
+              {/* Queued Sites List */}
+              {queue.length > 0 && (
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                  {queue.map((siteTowers, idx) => {
+                    const first = siteTowers[0];
+                    return (
+                      <div
+                        key={first.site_id || first.id || idx}
+                        className="flex items-center justify-between p-2 rounded-lg bg-slate-900/80 border border-slate-700 text-xs"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="font-semibold text-white truncate text-[11px] flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: getOpColor(first.operator) }} />
+                            <span>{first.location_name ? `📍 ${first.location_name}` : (first.site_id || first.name)}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            {first.operator || 'Carrier'} · {siteTowers.length} cell(s) · {first.lat.toFixed(4)}, {first.lng.toFixed(4)}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveFromQueue(idx)}
+                          className="text-slate-500 hover:text-red-400 p-1 transition-colors"
+                          title="Remove from queue"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Action button to trigger multi-site simulation */}
+              <button
+                onClick={handleSimulateMultiSites}
+                disabled={queue.length < 2 || multiSitesLoading}
+                className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-40 text-white py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-lg"
+              >
+                {multiSitesLoading ? (
+                  <Loader size={14} className="animate-spin" />
+                ) : (
+                  <Zap size={14} className="text-amber-300" />
+                )}
+                {multiSitesLoading
+                  ? 'Analyzing Overlaps & Deadzones…'
+                  : queue.length < 2
+                  ? `Queue ≥ 2 Sites to Analyze (${queue.length}/2 queued)`
+                  : `Analyze Overlaps & Deadzones (${queue.length} Sites)`}
+              </button>
+            </div>
           </>
         )}
 
@@ -1141,6 +1400,66 @@ export function SimulationPanel({
             <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-700/60">
               <span>Environment: <strong className="text-slate-300 capitalize">{result.environment}</strong></span>
               {result.terrain_aware && <span className="text-emerald-400 font-semibold">✦ Terrain-Aware</span>}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            MULTI-TOWER OVERLAP & DEADZONE KPI REPORT
+            ══════════════════════════════════════════════════════════════════ */}
+        {multiSimData && (multiSimData.overlap_area_km2 != null || multiSimData.deadzone_area_km2 != null) && (
+          <div className="bg-slate-800 p-3.5 rounded-lg border border-purple-500/50 space-y-3 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-700 pb-2">
+              <span className="font-bold text-white uppercase tracking-wide flex items-center gap-1.5">
+                <Zap size={14} className="text-amber-400" /> Overlap & Deadzone Report
+              </span>
+              <span className="font-mono text-purple-300 font-bold">
+                {multiSimData.towers_count} Transmitters
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="bg-slate-900/70 p-2.5 rounded border border-purple-900/60">
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">⚡ Overlap Zone</span>
+                <strong className="text-purple-300 text-sm font-mono block">
+                  {multiSimData.overlap_area_km2 ?? 0} km²
+                </strong>
+                <span className="text-[10px] text-purple-400 font-mono">
+                  {multiSimData.overlap_percentage ?? 0}% handover boundary
+                </span>
+              </div>
+
+              <div className="bg-slate-900/70 p-2.5 rounded border border-red-900/60">
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">🕳 Deadzones</span>
+                <strong className="text-red-400 text-sm font-mono block">
+                  {multiSimData.deadzone_area_km2 ?? 0} km²
+                </strong>
+                <span className="text-[10px] text-red-300 font-mono">
+                  RSRP &lt; -108 dBm holes
+                </span>
+              </div>
+
+              <div className="col-span-2 bg-slate-900/70 p-2 rounded border border-slate-700/60 flex items-center justify-between">
+                <span className="text-slate-400 text-[10px]">Total Combined Coverage</span>
+                <strong className="text-emerald-400 font-mono text-xs">
+                  {multiSimData.total_coverage_km2 ?? 0} km²
+                </strong>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-slate-400 bg-slate-900/40 p-2 rounded border border-slate-700/40 space-y-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                <span>Green/Amber/Blue: Best-Server composite coverage</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
+                <span>Magenta: Overlapping interference &amp; handover ping-pong zone</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+                <span>Red: Coverage holes (Deadzones between sites)</span>
+              </div>
             </div>
           </div>
         )}

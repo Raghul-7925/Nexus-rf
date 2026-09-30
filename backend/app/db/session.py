@@ -7,12 +7,14 @@ Postgres DSN later without touching models.py or any route code.
 """
 
 import os
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .models import Base
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./nexus_rf.db")
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "nexus_rf.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DEFAULT_DB_PATH.as_posix()}")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 

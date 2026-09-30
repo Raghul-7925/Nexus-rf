@@ -40,15 +40,40 @@
         </div>
       </div>
 
-      <!-- Auto-Scan Grid Section (Slide by slide with resume) -->
+      <!-- Auto-Scan Grid Section (District Wise + Custom Bounds) -->
       <div class="scan-card">
         <div class="scan-header">
-          <span class="scan-title">🛰 Auto-Grid Scanner (Slide by Slide)</span>
+          <span class="scan-title">🛰 Automated Tower Fetcher</span>
           <span class="scan-badge" id="scan-progress-badge">Ready</span>
         </div>
 
-        <!-- Start & End Coordinates -->
-        <div class="popup-coord-box">
+        <!-- Mode Switcher Tabs -->
+        <div class="scan-mode-tabs">
+          <button id="tab-btn-district" class="scan-tab-btn active">🏛 District Wise (Fast)</button>
+          <button id="tab-btn-coords" class="scan-tab-btn">📍 Custom Bounds</button>
+        </div>
+
+        <!-- 1. District Wise Scanner View -->
+        <div id="district-scan-box" class="district-scan-box">
+          <div class="popup-coord-row">
+            <span class="coord-label">State:</span>
+            <select id="popup-state-select" class="popup-select"></select>
+          </div>
+          <div class="popup-coord-row">
+            <span class="coord-label">District:</span>
+            <select id="popup-district-select" class="popup-select"></select>
+          </div>
+          <div class="popup-coord-row">
+            <span class="coord-label">Search:</span>
+            <input type="text" id="popup-district-search" placeholder="Type any district (e.g. Villupuram)..." class="popup-input" />
+          </div>
+          <div class="district-info-pill" id="popup-district-info">
+            Selected: <strong id="district-info-text">Villupuram, Tamil Nadu</strong>
+          </div>
+        </div>
+
+        <!-- 2. Custom Coordinates Scanner View -->
+        <div id="coords-scan-box" class="popup-coord-box" style="display: none;">
           <div class="popup-coord-row">
             <span class="coord-label">Start (SW):</span>
             <input type="number" step="0.0001" id="popup-start-lat" placeholder="Start Lat" class="popup-input" />
@@ -65,11 +90,14 @@
           </div>
         </div>
 
+        <!-- Progress Bar -->
         <div class="scan-progress-bar-bg">
           <div class="scan-progress-bar-fill" id="scan-progress-fill" style="width: 0%;"></div>
         </div>
+
+        <!-- Actions -->
         <div class="scan-actions">
-          <button id="btn-toggle-scan" class="btn btn-scan">▶ Start Auto-Scan</button>
+          <button id="btn-toggle-scan" class="btn btn-scan">⚡ Fast Fetch District Towers</button>
           <button id="btn-reset-scan" class="btn btn-secondary" title="Reset scan progress">Stop / Reset</button>
         </div>
       </div>
@@ -78,11 +106,11 @@
       <div class="mode-box">
         <div class="mode-row">
           <label class="mode-switch">
-            <input type="checkbox" id="raw-mode-toggle" />
+            <input type="checkbox" id="raw-mode-toggle" checked />
             <span class="slider"></span>
           </label>
           <div class="mode-info">
-            <strong>Raw Mode (Locations & Types Only)</strong>
+            <strong>Raw Mode (Pure Tower Locations Only)</strong>
             <span>Exports real coordinates & structure type with null operator & band info</span>
           </div>
         </div>
@@ -143,8 +171,8 @@
         <button id="btn-export-csv" class="btn btn-primary" title="Export Full CSV with multi-operator breakdown">
           📥 Full CSV
         </button>
-        <button id="btn-export-json" class="btn btn-secondary" title="Export JSON">
-          JSON
+        <button id="btn-push-nexus" class="btn btn-nexus" title="Push towers directly to local Nexus RF API (http://127.0.0.1:8000)">
+          🚀 Push to App
         </button>
       </div>
       <button id="btn-clear" class="btn btn-danger" title="Clear all stored tower data">
@@ -153,6 +181,7 @@
     </footer>
   </div>
 
+  <script src="districts.js"></script>
   <script src="parser.js"></script>
   <script src="popup.js"></script>
 </body>

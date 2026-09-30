@@ -3,11 +3,12 @@
  * - Stores unique tower sites & merges detail records.
  * - Supports Raw Mode (pure locations & types, null operator/band).
  * - Persistent Slide-by-Slide Auto-Scanner from Start coordinate to End coordinate.
- * - Runs until completion or until manually paused/stopped.
+ * - Automated District-Wise Fast Tower Location Fetcher.
+ * - Direct Push to Nexus RF Engine.
  */
 
-// Import parser into service worker
-importScripts('parser.js');
+// Import parser & districts into service worker
+importScripts('parser.js', 'districts.js');
 
 const STORAGE_KEY_SITES = 'tarang_sites';
 const STORAGE_KEY_SCAN = 'tarang_scan_state';
@@ -16,7 +17,7 @@ const STORAGE_KEY_SCAN = 'tarang_scan_state';
 chrome.runtime.onInstalled.addListener(() => {
   chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
   chrome.action.setBadgeText({ text: '' });
-  console.log('[Nexus RF] Tarang Sanchar Extractor installed.');
+  console.log('[Nexus RF] Tarang Sanchar Extractor installed with District Fetcher.');
 });
 
 function updateBadge(count) {
@@ -43,6 +44,10 @@ async function getScanState() {
     result[STORAGE_KEY_SCAN] || {
       isScanning: false,
       isPaused: false,
+      mode: 'coords', // 'coords' or 'district'
+      districtName: null,
+      stateName: null,
+      fastLocationsOnly: true,
       startLat: null,
       startLng: null,
       endLat: null,
@@ -344,6 +349,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           success: true,
           isScanning: state.isScanning,
           isPaused: state.isPaused,
+          mode: state.mode || 'coords',
+          districtName: state.districtName || null,
+          stateName: state.stateName || null,
+          fastLocationsOnly: state.fastLocationsOnly ?? true,
           completedCount: completed,
           totalTiles: state.tiles ? state.tiles.length : 0,
           startLat: state.startLat,
@@ -359,7 +368,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 8. Auto-Scanner: Start or Resume Scan
+  // 8. Auto-Scanner: Start or Resume Scan (Coordinate Bounding Box)
   if (request.action === 'START_OR_RESUME_SCAN') {
     (async () => {
       try {
@@ -385,6 +394,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const eLat = hasValidCoords ? endLat : (state.endLat || 11.96);
           const eLng = hasValidCoords ? endLng : (state.endLng || 79.76);
 
+          state.mode = 'coords';
+          state.districtName = null;
           state.startLat = sLat;
           state.startLng = sLng;
           state.endLat = eLat;
@@ -414,7 +425,76 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 9. Auto-Scanner: Tile Done (continue from where it left off)
+  // 9. Automated District-Wise Fast Fetcher
+  if (request.action === 'START_DISTRICT_SCAN') {
+    (async () => {
+      try {
+        const { state: reqState, district: reqDistrict, forceNew } = request;
+        if (!reqDistrict) {
+          sendResponse({ success: false, error: 'District name is required' });
+          return;
+        }
+
+        const bounds = TarangDistricts.getDistrictBounds(reqState, reqDistrict);
+        if (!bounds) {
+          sendResponse({ success: false, error: `Coordinates for district "${reqDistrict}" not found` });
+          return;
+        }
+
+        let state = await getScanState();
+        const isSameDistrict = state.districtName === reqDistrict && state.stateName === reqState;
+
+        if (forceNew || !isSameDistrict || !state.tiles || state.tiles.length === 0) {
+          const tiles = TarangDistricts.generateDistrictSlides(bounds);
+          state.mode = 'district';
+          state.stateName = reqState || 'Tamil Nadu';
+          state.districtName = reqDistrict;
+          state.fastLocationsOnly = true;
+          state.startLat = bounds[0];
+          state.startLng = bounds[1];
+          state.endLat = bounds[2];
+          state.endLng = bounds[3];
+          state.tiles = tiles;
+          state.currentIndex = 0;
+        }
+
+        state.isScanning = true;
+        state.isPaused = false;
+        await saveScanState(state);
+
+        const nextTile = state.tiles.find(t => !t.done);
+        sendResponse({
+          success: true,
+          mode: 'district',
+          state: reqState,
+          district: reqDistrict,
+          bounds,
+          nextTile: nextTile || null,
+          completedCount: state.tiles.filter(t => t.done).length,
+          totalTiles: state.tiles.length
+        });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // 10. Get Districts List
+  if (request.action === 'GET_DISTRICTS_DATA') {
+    try {
+      sendResponse({
+        success: true,
+        states: TarangDistricts.getStates(),
+        districtsData: TarangDistricts.DISTRICTS_DATA
+      });
+    } catch (err) {
+      sendResponse({ success: false, error: err.message });
+    }
+    return true;
+  }
+
+  // 11. Auto-Scanner: Tile Done (continue from where it left off)
   if (request.action === 'MARK_TILE_DONE') {
     (async () => {
       try {
@@ -443,7 +523,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 10. Auto-Scanner: Pause Scan
+  // 12. Auto-Scanner: Pause Scan
   if (request.action === 'PAUSE_SCAN') {
     (async () => {
       try {
@@ -459,7 +539,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 11. Auto-Scanner: Stop / Reset Scan
+  // 13. Auto-Scanner: Stop / Reset Scan
   if (request.action === 'RESET_SCAN' || request.action === 'STOP_SCAN') {
     (async () => {
       try {
@@ -476,7 +556,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 12. Clear storage
+  // 14. Push Captured Towers Directly to Nexus RF App (POST /api/import)
+  if (request.action === 'PUSH_TO_NEXUS_RF') {
+    (async () => {
+      try {
+        const targetUrl = request.apiUrl || 'http://127.0.0.1:8000/api/import';
+        const sites = await getStoredSites();
+        const sitesList = Object.values(sites);
+        if (sitesList.length === 0) {
+          sendResponse({ success: false, error: 'No captured tower sites to push.' });
+          return;
+        }
+
+        const csvContent = window.TarangParser.sitesToRawCSV(sitesList);
+
+        const formData = new FormData();
+        formData.append('text', csvContent);
+        formData.append('snap_to_baseline', 'false');
+
+        const resp = await fetch(targetUrl, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          sendResponse({ success: false, error: `Nexus RF API error: ${resp.status} - ${errText}` });
+          return;
+        }
+
+        const resData = await resp.json();
+        sendResponse({ success: true, count: sitesList.length, data: resData });
+      } catch (err) {
+        sendResponse({ success: false, error: `Could not connect to Nexus RF: ${err.message}` });
+      }
+    })();
+    return true;
+  }
+
+  // 15. Clear storage
   if (request.action === 'CLEAR_TOWERS') {
     (async () => {
       try {

@@ -36,6 +36,7 @@
       ],
       "js": [
         "parser.js",
+        "districts.js",
         "content.js"
       ],
       "run_at": "document_start"
@@ -45,7 +46,8 @@
     {
       "resources": [
         "injected.js",
-        "parser.js"
+        "parser.js",
+        "districts.js"
       ],
       "matches": [
         "*://tarangsanchar.gov.in/*",

@@ -242,6 +242,81 @@ h1 {
   background: #0369a1;
 }
 
+.scan-mode-tabs {
+  display: flex;
+  gap: 6px;
+  background: #0f172a;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+}
+
+.scan-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.scan-tab-btn.active {
+  background: #0284c7;
+  color: white;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
+}
+
+.district-scan-box {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.popup-select {
+  flex: 1;
+  min-width: 0;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: #f8fafc;
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.popup-select:focus {
+  border-color: #38bdf8;
+}
+
+.district-info-pill {
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(2, 132, 199, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.btn-nexus {
+  background: #7c3aed;
+  color: white;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+}
+
+.btn-nexus:hover {
+  background: #6d28d9;
+}
+
 /* Mode Box Toggle */
 .mode-box {
   background: rgba(30, 41, 59, 0.4);
