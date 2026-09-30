@@ -13,19 +13,20 @@
 
   console.log('[Nexus RF] Content script active on Tarang Sanchar with District Fetcher.');
 
-  // Inject scripts into host page context
-  function injectScript(file) {
+  // Inject scripts sequentially to guarantee TarangParser and TarangDistricts exist before sniffer
+  function injectScriptsSequentially(files) {
+    if (!files || files.length === 0) return;
+    const file = files[0];
     const s = document.createElement('script');
     s.src = chrome.runtime.getURL(file);
     s.onload = function () {
       this.remove();
+      injectScriptsSequentially(files.slice(1));
     };
     (document.head || document.documentElement).appendChild(s);
   }
 
-  injectScript('districts.js');
-  injectScript('parser.js');
-  injectScript('injected.js');
+  injectScriptsSequentially(['districts.js', 'parser.js', 'injected.js']);
 
   // --- Floating HUD Widget ---
   let floatingWidget = null;
@@ -531,6 +532,18 @@
     if (bounds) {
       const slides = window.TarangDistricts.generateDistrictSlides(bounds);
       districtInfoEl.textContent = `${district}, ${state} · ${slides.length} slides`;
+
+      // Auto-pan map to district center
+      const center = window.TarangDistricts.getDistrictCenter ? window.TarangDistricts.getDistrictCenter(state, district) : null;
+      if (center) {
+        window.postMessage({
+          source: 'TARANG_CONTENT',
+          type: 'PAN_TO_COORDS',
+          lat: center[0],
+          lng: center[1],
+          zoom: 12
+        }, '*');
+      }
     } else {
       districtInfoEl.textContent = `${district}, ${state}`;
     }
@@ -653,7 +666,15 @@
   function exportRawCSV() {
     chrome.runtime.sendMessage({ action: 'GET_RAW_CSV' }, response => {
       if (!response || !response.csv) {
-        alert('No towers captured yet. Start Fast District Fetch or pan the map on Tarang Sanchar first!');
+        const dist = districtSelectEl ? districtSelectEl.value : 'this district';
+        const startFetch = confirm(
+          `No towers captured yet for ${dist}!\n\n` +
+          `Would you like to start "⚡ Fast Fetch District Towers" now?\n` +
+          `It will automatically sweep all slides in ${dist} and capture every tower location.`
+        );
+        if (startFetch) {
+          toggleAutoScan();
+        }
         return;
       }
       const dist = districtSelectEl ? districtSelectEl.value : 'district';
@@ -666,11 +687,23 @@
     chrome.runtime.sendMessage({ action: 'GET_TOWERS' }, response => {
       const towers = (response && response.towers) || [];
       if (towers.length === 0) {
-        alert('No towers captured yet. Start Fast District Fetch or pan the map on Tarang Sanchar first!');
+        const dist = districtSelectEl ? districtSelectEl.value : 'this district';
+        const startFetch = confirm(
+          `No towers captured yet for ${dist}!\n\n` +
+          `Would you like to start "⚡ Fast Fetch District Towers" now to gather towers?`
+        );
+        if (startFetch) {
+          toggleAutoScan();
+        }
         return;
       }
       const dist = districtSelectEl ? districtSelectEl.value : 'district';
-      const csv = window.TarangParser.towersToCSV(towers);
+      const parser = typeof TarangParser !== 'undefined' ? TarangParser : (typeof window !== 'undefined' ? window.TarangParser : null);
+      if (!parser) {
+        alert('TarangParser not available. Please reload the page.');
+        return;
+      }
+      const csv = parser.towersToCSV(towers);
       const filename = `tarangsanchar_full_${dist}_${new Date().toISOString().slice(0, 10)}.csv`;
       triggerDownload(csv, filename, 'text/csv;charset=utf-8;');
     });

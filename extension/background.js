@@ -298,7 +298,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: false, csv: '', error: 'No sites found' });
           return;
         }
-        const csv = window.TarangParser.sitesToRawCSV(sitesList);
+        const parser = typeof TarangParser !== 'undefined' ? TarangParser : self.TarangParser;
+        const csv = parser.sitesToRawCSV(sitesList);
         sendResponse({ success: true, csv: csv, count: sitesList.length });
       } catch (err) {
         sendResponse({ success: false, csv: '', error: err.message });
@@ -568,7 +569,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        const csvContent = window.TarangParser.sitesToRawCSV(sitesList);
+        const parser = typeof TarangParser !== 'undefined' ? TarangParser : self.TarangParser;
+        const csvContent = parser.sitesToRawCSV(sitesList);
 
         const formData = new FormData();
         formData.append('text', csvContent);

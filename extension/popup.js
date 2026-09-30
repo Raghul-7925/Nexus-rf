@@ -434,7 +434,15 @@ document.addEventListener('DOMContentLoaded', () => {
   btnExportRawCsv.addEventListener('click', () => {
     chrome.runtime.sendMessage({ action: 'GET_RAW_CSV' }, response => {
       if (!response || !response.csv) {
-        alert('No towers captured yet. Start Fast District Fetch or pan the map on Tarang Sanchar first!');
+        const dist = popupDistrictSelect ? popupDistrictSelect.value : 'this district';
+        const startFetch = confirm(
+          `No towers captured yet for ${dist}!\n\n` +
+          `Would you like to start "⚡ Fast Fetch District Towers" now?\n` +
+          `It will automatically gather all tower coordinates for ${dist}.`
+        );
+        if (startFetch) {
+          btnToggleScan.click();
+        }
         return;
       }
       const dist = popupDistrictSelect ? popupDistrictSelect.value : 'district';
@@ -446,11 +454,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Export Full CSV (With Operators & Bands) ───────────────────────────────
   btnExportCsv.addEventListener('click', () => {
     if (allTowers.length === 0) {
-      alert('No towers captured yet. Start Auto-Scan or pan the map on Tarang Sanchar first!');
+      const dist = popupDistrictSelect ? popupDistrictSelect.value : 'this district';
+      const startFetch = confirm(
+        `No towers captured yet for ${dist}!\n\n` +
+        `Would you like to start "⚡ Fast Fetch District Towers" now to gather towers?`
+      );
+      if (startFetch) {
+        btnToggleScan.click();
+      }
       return;
     }
     const dist = popupDistrictSelect ? popupDistrictSelect.value : 'towers';
-    const csv = window.TarangParser.towersToCSV(allTowers);
+    const parser = typeof TarangParser !== 'undefined' ? TarangParser : (typeof window !== 'undefined' ? window.TarangParser : null);
+    if (!parser) {
+      alert('TarangParser not available. Please reopen popup.');
+      return;
+    }
+    const csv = parser.towersToCSV(allTowers);
     const dateStr = new Date().toISOString().slice(0, 10);
     triggerDownload(csv, `tarangsanchar_full_${dist}_${dateStr}.csv`, 'text/csv;charset=utf-8;');
   });

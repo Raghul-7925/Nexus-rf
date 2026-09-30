@@ -177,6 +177,16 @@
   }
 
   /**
+   * Get center coordinate [lat, lng] for a district
+   */
+  function getDistrictCenter(state, district) {
+    if (DISTRICTS_DATA[state] && DISTRICTS_DATA[state][district]) {
+      return DISTRICTS_DATA[state][district].center;
+    }
+    return findDistrictByName(district)?.center || null;
+  }
+
+  /**
    * Find District by Name (case-insensitive fuzzy match)
    */
   function findDistrictByName(query) {
@@ -245,6 +255,7 @@
     getStates,
     getDistrictsForState,
     getDistrictBounds,
+    getDistrictCenter,
     findDistrictByName,
     generateDistrictSlides
   };

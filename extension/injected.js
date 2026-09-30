@@ -242,5 +242,23 @@
       };
       mapDiv.addEventListener('click', onMapDomClick, { capture: true, once: true });
     }
+
+    // Pan map to coordinates (e.g. when district is selected)
+    if (event.data.source === 'TARANG_CONTENT' && event.data.type === 'PAN_TO_COORDS') {
+      const { lat, lng, zoom } = event.data;
+      try {
+        let leafletMap = window.map;
+        if (!leafletMap || typeof leafletMap.setView !== 'function') {
+          const el = document.querySelector('.leaflet-container');
+          if (el && el._leaflet_map) leafletMap = el._leaflet_map;
+        }
+        if (leafletMap && typeof leafletMap.setView === 'function') {
+          leafletMap.setView([lat, lng], zoom || 12);
+        } else if (window.google && window.google.maps && window.map && typeof window.map.setCenter === 'function') {
+          window.map.setCenter({ lat, lng });
+          if (zoom) window.map.setZoom(zoom);
+        }
+      } catch (e) {}
+    }
   });
 })();
