@@ -149,6 +149,7 @@
           <button id="nrf-push-app-btn" class="nrf-btn nrf-btn-nexus" title="Push directly to local Nexus RF app (http://127.0.0.1:8000)">🚀 Push App</button>
           <button id="nrf-clear-btn" class="nrf-btn nrf-btn-ghost" title="Clear all stored data">Clear</button>
         </div>
+        <button id="nrf-cloud-handover-btn" class="nrf-btn" style="background:#0284c7; color:white; width:100%; margin-top:6px;" title="Delegate scraping to Cloud Worker 24/7">☁️ Handover Session to Cloud Worker</button>
       </div>
     `;
 
@@ -464,6 +465,7 @@
     document.getElementById('nrf-download-csv').addEventListener('click', exportFullCSV);
     document.getElementById('nrf-push-app-btn').addEventListener('click', pushToNexusRF);
     document.getElementById('nrf-clear-btn').addEventListener('click', clearData);
+    document.getElementById('nrf-cloud-handover-btn').addEventListener('click', handoverSessionToCloudWorker);
 
     document.getElementById('nrf-pick-start-btn').addEventListener('click', () => startPickMode('start'));
     document.getElementById('nrf-pick-end-btn').addEventListener('click', () => startPickMode('end'));
@@ -721,6 +723,30 @@
         alert(`Successfully imported ${res.count} tower sites directly into Nexus RF at http://127.0.0.1:8000!`);
       } else {
         alert(`Push failed: ${res?.error || 'Make sure Nexus RF backend is running on http://127.0.0.1:8000'}`);
+      }
+    });
+  }
+
+  function handoverSessionToCloudWorker() {
+    const btn = document.getElementById('nrf-cloud-handover-btn');
+    const cloudUrl = prompt('Enter your Cloud Worker URL:', 'http://127.0.0.1:8001');
+    if (!cloudUrl) return;
+
+    btn.textContent = 'Syncing...';
+    btn.disabled = true;
+
+    chrome.runtime.sendMessage({ action: 'SYNC_SESSION_TO_CLOUD_WORKER', cloudUrl }, res => {
+      btn.disabled = false;
+      btn.textContent = '☁️ Handover Session to Cloud Worker';
+      if (res && res.success) {
+        alert(
+          `✅ Session successfully synced to Cloud Worker at ${cloudUrl}!\n\n` +
+          `The Cloud Worker is now authorized to scrape 24/7 autonomously.\n` +
+          `You can now safely close this browser or turn off your computer!\n\n` +
+          `Visit the Cloud Dashboard at ${cloudUrl} to start sweeping any district.`
+        );
+      } else {
+        alert(`❌ Handover failed: ${res?.error || 'Could not connect to Cloud Worker'}`);
       }
     });
   }

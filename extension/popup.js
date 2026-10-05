@@ -565,5 +565,56 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ── Cloud Worker Session Handover ──────────────────────────────────────────
+  const btnSyncCloudSession = document.getElementById('btn-sync-cloud-session');
+  const cloudWorkerUrlInput = document.getElementById('cloud-worker-url');
+  const cloudSyncStatusEl = document.getElementById('cloud-sync-status');
+  const linkCloudDashboard = document.getElementById('link-cloud-dashboard');
+
+  if (btnSyncCloudSession) {
+    chrome.storage.local.get(['cloud_worker_url'], res => {
+      if (res && res.cloud_worker_url) {
+        cloudWorkerUrlInput.value = res.cloud_worker_url;
+        if (linkCloudDashboard) linkCloudDashboard.href = res.cloud_worker_url;
+      }
+    });
+
+    cloudWorkerUrlInput.addEventListener('change', () => {
+      const url = cloudWorkerUrlInput.value.trim();
+      chrome.storage.local.set({ cloud_worker_url: url });
+      if (linkCloudDashboard) linkCloudDashboard.href = url;
+    });
+
+    btnSyncCloudSession.addEventListener('click', () => {
+      const cloudUrl = (cloudWorkerUrlInput.value || 'http://127.0.0.1:8001').trim();
+      btnSyncCloudSession.textContent = 'Sending...';
+      btnSyncCloudSession.disabled = true;
+      cloudSyncStatusEl.textContent = 'Extracting active Tarang Sanchar session cookies...';
+      cloudSyncStatusEl.style.color = '#38bdf8';
+
+      chrome.runtime.sendMessage(
+        { action: 'SYNC_SESSION_TO_CLOUD_WORKER', cloudUrl },
+        response => {
+          btnSyncCloudSession.disabled = false;
+          btnSyncCloudSession.textContent = '🚀 Send Session';
+
+          if (response && response.success) {
+            cloudSyncStatusEl.textContent = '✅ Session synced to Cloud Worker! You can now close this tab.';
+            cloudSyncStatusEl.style.color = '#10b981';
+            alert(
+              `Session successfully handed over to Cloud Worker at ${cloudUrl}!\n\n` +
+              `The Cloud Worker is now ready to scrape towers 24/7 autonomously.\n` +
+              `Click "Open Dashboard ↗" to view real-time progress and start sweeping!`
+            );
+          } else {
+            cloudSyncStatusEl.textContent = `❌ ${response?.error || 'Failed to sync session.'}`;
+            cloudSyncStatusEl.style.color = '#ef4444';
+            alert(`Session handover failed: ${response?.error || 'Unknown error'}`);
+          }
+        }
+      );
+    });
+  }
+
   loadData();
 });

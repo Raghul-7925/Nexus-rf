@@ -35,5 +35,18 @@ Status: All requested fixes for App & Extension completed, verified, and running
   - [x] **Data Scoping & Scoped Export**: Segregated real baseline towers (`tarangsanchar`) from user test/planned towers (`user_test`, `rf_planned`). Scoped exports allow downloading only test/planned data, real baseline data, or complete merged dataset.
   - [x] **Map Enhancements**: Added source badges (🛠️ Planned, 🧪 Test, 🏛 Real) to markers and popups, plus top-level source filter pills (All, Real, Test/Plan).
   - [x] All 42/42 backend tests passing.
-  - [x] Frontend builds with 0 errors and dev server running on http://localhost:5173.
+  - [x] Phase 7: Standalone Cloud Worker Microservice (Autonomous Cloud Scraper)
+  - [x] **Directory & Containerization**: Created `cloud_worker/` with `requirements.txt`, `Dockerfile`, and `railway.json` for 1-click cloud deployment.
+  - [x] **Data Model & Storage**: SQLite / PostgreSQL schema (`sites`, `jobs`, `logs`, `sessions`) with migration-free SQLAlchemy persistence.
+  - [x] **District & Slide Generator**: Ported Indian districts database (`districts.py`) with all states, bounding boxes, and snake-sweep slide tiling.
+  - [x] **Scraper Engine**: Async `httpx` worker with rate-limiting, jitter, exponential retry, and auto-pause on session expiration.
+  - [x] **Worker REST API**:
+    - `POST /api/worker/session` (Receive active session from extension)
+    - `POST /api/worker/start`, `POST /api/worker/pause`, `POST /api/worker/resume`, `POST /api/worker/stop`
+    - `GET /api/worker/status`, `GET /api/worker/towers`, `GET /api/worker/export/csv`, `POST /api/worker/sync-nexus`
+  - [x] **Web Dashboard**: Responsive single-page UI at `/` (stats, district picker, progress bar, real-time logs, CSV download, sync to Nexus RF).
+  - [x] **Extension 1-Click Session Sync**: Added `"cookies"` permission and cloud sync button in extension popup and HUD.
+  - [x] **Unit Tests**: Full test suite for the cloud worker with mocked responses (9/9 passed, 59/59 all tests passed).
+
+
 

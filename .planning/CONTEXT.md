@@ -29,3 +29,11 @@ To collect clean, real data for the user's demo city/region, we are building a b
   - Mini table preview with search filter.
   - "Export CSV (Nexus RF)", "Export JSON", and "Clear Storage" buttons.
 
+## Cloud Worker Microservice Architecture
+- **Purpose**: Autonomous, 24/7 cloud-based scraping of mobile cellular tower coordinates and tower types across India without consuming the user's local PC resources or requiring open browser tabs.
+- **Hosting**: Standalone Docker container / microservice deployable to Railway, Render, or any VPS.
+- **Session Handover**: 1-Click session sync from the Chrome extension (`chrome.cookies.getAll` extracts `ASP.NET_SessionId` and verification tokens) to the Cloud Worker REST API (`POST /api/worker/session`).
+- **Scraper Engine**: Async high-throughput runner (`httpx`) sweeping district slides (~2.4 km × ~2.8 km tiles), persistent state in SQLite/PostgreSQL, polite rate-limiting with jitter, automatic retry with backoff, and deduplication.
+- **Web Dashboard**: Embedded lightweight responsive web UI served at `/` with real-time progress metrics, district selection, live logs, CSV download, and 1-click sync to the main Nexus RF engine.
+
+

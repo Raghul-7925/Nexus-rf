@@ -609,4 +609,56 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })();
     return true;
   }
+
+  // 16. Handover active Tarang Sanchar session to Cloud Worker
+  if (request.action === 'SYNC_SESSION_TO_CLOUD_WORKER') {
+    (async () => {
+      try {
+        const cloudBaseUrl = (request.cloudUrl || 'http://127.0.0.1:8001').replace(/\/+$/, '');
+        const targetEndpoint = `${cloudBaseUrl}/api/worker/session`;
+
+        chrome.cookies.getAll({ domain: 'tarangsanchar.gov.in' }, async cookies => {
+          if (!cookies || cookies.length === 0) {
+            sendResponse({
+              success: false,
+              error: 'No active session cookies found for tarangsanchar.gov.in. Please open and verify on Tarang Sanchar first.'
+            });
+            return;
+          }
+
+          // Build cookie header string
+          const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+          try {
+            const resp = await fetch(targetEndpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cookie: cookieStr, cookies })
+            });
+
+            if (!resp.ok) {
+              const text = await resp.text();
+              sendResponse({ success: false, error: `Cloud Worker returned ${resp.status}: ${text}` });
+              return;
+            }
+
+            const data = await resp.json();
+            sendResponse({
+              success: true,
+              message: 'Session handed over to Cloud Worker! It will now scrape 24/7 autonomously in the cloud.',
+              data
+            });
+          } catch (netErr) {
+            sendResponse({
+              success: false,
+              error: `Could not reach Cloud Worker at ${targetEndpoint}. Make sure Cloud Worker is running.`
+            });
+          }
+        });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
 });

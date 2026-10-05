@@ -5,7 +5,8 @@
   "description": "Captures and exports mobile cellular tower data from Tarang Sanchar for the Nexus RF simulation engine.",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "cookies"
   ],
   "host_permissions": [
     "*://tarangsanchar.gov.in/*",
