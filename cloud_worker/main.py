@@ -93,10 +93,15 @@ def get_districts_list():
 
 
 @app.post("/api/worker/start")
-def start_worker(payload: StartJobPayload):
-    bounds = get_district_bounds(payload.state, payload.district)
-    if not bounds:
-        raise HTTPException(status_code=404, detail="District not found")
+async def start_worker(payload: StartJobPayload):
+    is_multi = (
+        payload.state in ["All India", "All India (Entire Country)"]
+        or payload.district.startswith("All Districts")
+    )
+    if not is_multi:
+        bounds = get_district_bounds(payload.state, payload.district)
+        if not bounds:
+            raise HTTPException(status_code=404, detail="District not found")
 
     cookie = worker_instance.get_stored_session_cookie()
     if not cookie:
@@ -114,20 +119,37 @@ def start_worker(payload: StartJobPayload):
     }
 
 
+@app.post("/api/worker/start-all-india")
+async def start_all_india():
+    cookie = worker_instance.get_stored_session_cookie()
+    if not cookie:
+        raise HTTPException(
+            status_code=400,
+            detail="No session cookie available. Please sync session from Chrome extension first."
+        )
+
+    worker_instance.start_all_india_sweep()
+    return {
+        "success": True,
+        "message": "Autonomous sweep started for all 175 districts across India!",
+        "total_districts": worker_instance.total_districts_in_queue
+    }
+
+
 @app.post("/api/worker/pause")
-def pause_worker():
+async def pause_worker():
     worker_instance.pause()
     return {"success": True, "is_paused": True}
 
 
 @app.post("/api/worker/resume")
-def resume_worker():
+async def resume_worker():
     worker_instance.resume()
     return {"success": True, "is_paused": False}
 
 
 @app.post("/api/worker/stop")
-def stop_worker():
+async def stop_worker():
     worker_instance.stop()
     return {"success": True, "is_running": False}
 
@@ -145,10 +167,13 @@ def get_worker_status(db: Session = Depends(get_db)):
     return {
         "is_running": worker_instance.is_running,
         "is_paused": worker_instance.is_paused,
+        "is_all_india": worker_instance.is_all_india,
         "state": worker_instance.current_state,
         "district": worker_instance.current_district,
         "current_slide": worker_instance.current_slide_idx,
         "total_slides": worker_instance.total_slides,
+        "queue_index": worker_instance.queue_index,
+        "total_districts": worker_instance.total_districts_in_queue,
         "progress_percent": progress_pct,
         "sites_captured_session": worker_instance.sites_captured_this_session,
         "total_sites_database": total_sites_count,
@@ -374,6 +399,24 @@ def dashboard():
 
     <!-- Controls & Progress Panel -->
     <div class="glass-card rounded-xl p-5 space-y-4">
+      <!-- 1-Click All India Quick Banner -->
+      <div class="bg-gradient-to-r from-blue-950/60 via-purple-950/40 to-emerald-950/60 border border-blue-500/30 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-3xl">🇮🇳</span>
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              Full India Autonomous Auto-Sweep <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2 py-0.5 rounded font-mono">175 Districts · 34 States & UTs</span>
+            </h3>
+            <p class="text-xs text-gray-400 mt-0.5">
+              Crawls every single state and district sequentially on its own 24/7. Auto-advances across the country with zero manual clicking.
+            </p>
+          </div>
+        </div>
+        <button id="btn-start-all-india" onclick="startAllIndiaSweep()" class="px-5 py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-bold text-xs rounded-lg transition shadow-lg shadow-emerald-600/30 flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-play"></i> Start Full India Auto-Sweep
+        </button>
+      </div>
+
       <div class="flex flex-col md:flex-row items-center justify-between gap-4">
         <!-- District Picker -->
         <div class="flex items-center space-x-3 w-full md:w-auto">
@@ -385,13 +428,13 @@ def dashboard():
           </div>
           <div>
             <label class="text-xs text-gray-400 block mb-1">District</label>
-            <select id="district-select" class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500 min-w-[160px]">
+            <select id="district-select" class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500 min-w-[180px]">
               <option value="">Select State First</option>
             </select>
           </div>
           <div class="pt-5">
             <button id="btn-start" onclick="startSweep()" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-lg transition flex items-center gap-1.5 shadow-lg shadow-blue-600/30">
-              <i class="fa-solid fa-bolt"></i> Start Autonomous Sweep
+              <i class="fa-solid fa-bolt"></i> Start Sweep
             </button>
           </div>
         </div>
@@ -541,11 +584,11 @@ def dashboard():
       const districtSelect = document.getElementById('district-select');
       districtSelect.innerHTML = '';
       const list = districtsData[state] || [];
-      list.forEach(d => {
+      list.forEach((d, idx) => {
         const opt = document.createElement('option');
         opt.value = d;
         opt.textContent = d;
-        if (d === 'Villupuram') opt.selected = true;
+        if (state.includes('All India') || idx === 0) opt.selected = true;
         districtSelect.appendChild(opt);
       });
     }
@@ -566,9 +609,13 @@ def dashboard():
         const stateEl = document.getElementById('stat-worker-state');
         const subEl = document.getElementById('stat-worker-sub');
         if (data.is_running) {
-          stateEl.textContent = data.is_paused ? 'PAUSED' : 'SWEEPING';
+          stateEl.textContent = data.is_paused ? 'PAUSED' : (data.is_all_india ? 'ALL-INDIA SWEEP' : 'SWEEPING');
           stateEl.className = data.is_paused ? 'text-2xl font-extrabold text-amber-400 font-mono' : 'text-2xl font-extrabold text-emerald-400 font-mono animate-pulse';
-          subEl.textContent = `[${data.district || ''}] ${data.current_slide}/${data.total_slides} slides`;
+          if (data.is_all_india) {
+            subEl.textContent = `[🇮🇳 All India] Dist ${data.queue_index + 1}/${data.total_districts}: ${data.district}`;
+          } else {
+            subEl.textContent = `[${data.district || ''}] Slide ${data.current_slide}/${data.total_slides}`;
+          }
         } else {
           stateEl.textContent = 'IDLE';
           stateEl.className = 'text-2xl font-extrabold text-purple-400 font-mono';
@@ -578,7 +625,15 @@ def dashboard():
         // Progress bar
         document.getElementById('progress-bar').style.width = `${data.progress_percent}%`;
         document.getElementById('progress-pct-label').textContent = `${data.progress_percent}%`;
-        document.getElementById('progress-label').textContent = data.is_running ? `Sweeping ${data.district}, ${data.state} (Slide ${data.current_slide}/${data.total_slides})` : 'Sweep Progress';
+        if (data.is_running) {
+          if (data.is_all_india) {
+            document.getElementById('progress-label').textContent = `🇮🇳 Full India Sweep: District ${data.queue_index + 1}/${data.total_districts} (${data.district}, ${data.state}) · Slide ${data.current_slide}/${data.total_slides}`;
+          } else {
+            document.getElementById('progress-label').textContent = `Sweeping ${data.district}, ${data.state} (Slide ${data.current_slide}/${data.total_slides})`;
+          }
+        } else {
+          document.getElementById('progress-label').textContent = 'Sweep Progress';
+        }
 
         // Session badge
         const badge = document.getElementById('session-badge');
@@ -620,6 +675,18 @@ def dashboard():
         pollStatus();
       } catch (e) {
         alert("Failed to start: " + e.message);
+      }
+    }
+
+    async function startAllIndiaSweep() {
+      if (!confirm("Start autonomous sweep across all 175 districts in India? The worker will automatically crawl the entire country district-by-district on its own 24/7.")) return;
+      try {
+        const res = await fetch('/api/worker/start-all-india', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) alert(data.detail || "Error starting All-India sweep");
+        pollStatus();
+      } catch (e) {
+        alert("Failed to start All India sweep: " + e.message);
       }
     }
 

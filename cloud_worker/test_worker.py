@@ -187,5 +187,46 @@ def test_compatibility_with_nexus_rf_parser():
     assert "Ground Based" in found["tower_type"]
 
 
+def test_all_india_districts_and_queue():
+    from districts import get_states, get_districts_for_state, get_all_india_queue
+    states = get_states()
+    assert "All India (Entire Country)" in states
+    assert "Tamil Nadu" in states
+    assert "Maharashtra" in states
+    assert "Delhi NCR" in states
+    assert "Uttar Pradesh" in states
+
+    all_dists = get_districts_for_state("All India (Entire Country)")
+    assert "All Districts (Full Country Auto-Sweep)" in all_dists
+
+    queue = get_all_india_queue()
+    assert len(queue) >= 150  # Over 150 districts across all 28 states & UTs
+    # Verify tuple structure (state, district)
+    for s, d in queue[:10]:
+        assert isinstance(s, str) and len(s) > 0
+        assert isinstance(d, str) and len(d) > 0
+
+
+def test_start_all_india_endpoint():
+    # Session must be active (seeded by earlier test)
+    res = client.post("/api/worker/start-all-india")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["total_districts"] >= 150
+
+    # Verify worker status reports all-india mode
+    status_res = client.get("/api/worker/status")
+    assert status_res.status_code == 200
+    st = status_res.json()
+    assert st["is_running"] is True
+    assert st["is_all_india"] is True
+    assert st["total_districts"] >= 150
+
+    # Stop worker cleanly
+    client.post("/api/worker/stop")
+
+
+
 
 

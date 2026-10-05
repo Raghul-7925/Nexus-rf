@@ -614,6 +614,50 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       );
     });
+
+    const btnSyncAndAllIndia = document.getElementById('btn-sync-and-all-india');
+    if (btnSyncAndAllIndia) {
+      btnSyncAndAllIndia.addEventListener('click', () => {
+        const cloudUrl = (cloudWorkerUrlInput.value || 'http://127.0.0.1:8001').trim();
+        btnSyncAndAllIndia.textContent = 'Starting...';
+        btnSyncAndAllIndia.disabled = true;
+        cloudSyncStatusEl.textContent = 'Syncing session and initiating Full India Auto-Sweep...';
+        cloudSyncStatusEl.style.color = '#38bdf8';
+
+        chrome.runtime.sendMessage(
+          { action: 'SYNC_SESSION_TO_CLOUD_WORKER', cloudUrl },
+          async response => {
+            btnSyncAndAllIndia.disabled = false;
+            btnSyncAndAllIndia.textContent = '🇮🇳 Auto-Sweep India';
+
+            if (response && response.success) {
+              try {
+                const startRes = await fetch(`${cloudUrl}/api/worker/start-all-india`, { method: 'POST' });
+                const startData = await startRes.json();
+                if (startRes.ok) {
+                  cloudSyncStatusEl.textContent = '🚀 Full India Auto-Sweep RUNNING (175 Districts)!';
+                  cloudSyncStatusEl.style.color = '#10b981';
+                  alert(
+                    `🇮🇳 Full India Autonomous Sweep Started!\n\n` +
+                    `Session handed over and auto-crawler is sweeping all 175 districts sequentially.\n` +
+                    `You can now shut your PC down or close this tab.\n` +
+                    `Open dashboard at ${cloudUrl} anytime to check live progress.`
+                  );
+                } else {
+                  alert(`Started session but failed to launch sweep: ${startData.detail || 'Unknown error'}`);
+                }
+              } catch (err) {
+                alert(`Error starting sweep: ${err.message}`);
+              }
+            } else {
+              cloudSyncStatusEl.textContent = `❌ ${response?.error || 'Failed to sync session.'}`;
+              cloudSyncStatusEl.style.color = '#ef4444';
+              alert(`Session handover failed: ${response?.error || 'Unknown error'}`);
+            }
+          }
+        );
+      });
+    }
   }
 
   loadData();
