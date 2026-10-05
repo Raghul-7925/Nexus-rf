@@ -248,47 +248,38 @@ class TarangScraperWorker:
             except Exception:
                 return sites
 
-        # 1. Category-grouped dictionary (Cinema, Shop, Cafe, COW, etc.)
+        dicts_to_check = []
         if isinstance(data, dict):
-            for cat in ["Cinema", "Shop", "Cafe", "COW", "Hospital", "School", "Hotel", "Mall", "Office"]:
-                if cat in data and isinstance(data[cat], list):
-                    for item in data[cat]:
-                        s = self._parse_single_item(item, state, district, category=cat)
+            dicts_to_check.append(data)
+        elif isinstance(data, list):
+            for elem in data:
+                if isinstance(elem, dict):
+                    # Check if elem is a category container e.g. [{"Cinema": [...], "Shop": [...]}]
+                    has_categories = any(
+                        cat in elem for cat in [
+                            "Cinema", "Shop", "Cafe", "COW", "Hospital", "School",
+                            "Hotel", "Mall", "Office", "Club", "Theatre", "Theater", "Table", "Table1"
+                        ]
+                    )
+                    if has_categories or any(isinstance(v, list) for v in elem.values()):
+                        dicts_to_check.append(elem)
+                    else:
+                        s = self._parse_single_item(elem, state, district)
                         if s:
                             sites.append(s)
 
-            if not sites:
-                for k, v in data.items():
-                    if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
-                        for item in v:
-                            s = self._parse_single_item(item, state, district, category=k)
+        for group in dicts_to_check:
+            for cat, items in group.items():
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            s = self._parse_single_item(item, state, district, category=cat)
                             if s:
                                 sites.append(s)
-            if sites:
-                return sites
-
-        # 2. Table, Table1, features, data, or direct list
-        records = []
-        if isinstance(data, list):
-            records = data
-        elif isinstance(data, dict):
-            if "Table" in data and isinstance(data["Table"], list):
-                records = data["Table"]
-            elif "Table1" in data and isinstance(data["Table1"], list):
-                records = data["Table1"]
-            elif "features" in data and isinstance(data["features"], list):
-                for f in data["features"]:
-                    s = self._parse_single_item(f, state, district)
+                elif isinstance(items, dict):
+                    s = self._parse_single_item(items, state, district, category=cat)
                     if s:
                         sites.append(s)
-                return sites
-            elif "data" in data and isinstance(data["data"], list):
-                records = data["data"]
-
-        for item in records:
-            s = self._parse_single_item(item, state, district)
-            if s:
-                sites.append(s)
 
         return sites
 
@@ -371,9 +362,15 @@ class TarangScraperWorker:
                                 break
                             continue
 
-                        data = resp.json()
-                        sites = self.parse_payload(data, state, district)
-                        success = True
+                        try:
+                            data = resp.json()
+                            sites = self.parse_payload(data, state, district)
+                            success = True
+                        except Exception:
+                            # Not valid JSON
+                            self.log(f"Slide {self.current_slide_idx}: Non-JSON response ({text[:60]}). Skipping.", "WARN")
+                            success = True
+                            sites = []
 
                         if sites:
                             with SessionLocal() as db:
@@ -419,12 +416,14 @@ class TarangScraperWorker:
 
                     else:
                         retries -= 1
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(0.8)
                 except Exception as err:
                     retries -= 1
+                    err_name = type(err).__name__
+                    err_detail = str(err).strip() or err_name
                     if retries == 0:
-                        self.log(f"Slide error ({district}): {err}", "ERROR")
-                    await asyncio.sleep(1.5)
+                        self.log(f"⚠️ Slide {self.current_slide_idx}/{self.total_slides} error ({district}): {err_name} - {err_detail}", "ERROR")
+                    await asyncio.sleep(1.0)
 
             # Jittered polite delay
             await asyncio.sleep(random.uniform(0.20, 0.35))
@@ -471,7 +470,9 @@ class TarangScraperWorker:
             "Cookie": cookie
         }
 
-        async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
+        timeout = httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0)
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=10.0)
+        async with httpx.AsyncClient(timeout=timeout, limits=limits, verify=False) as client:
             for q_idx, (state, district) in enumerate(queue):
                 if not self.is_running:
                     self.log(f"⏹ Sweep stopped at district {q_idx + 1}/{len(queue)}.", "INFO")
