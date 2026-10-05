@@ -35,10 +35,10 @@ def test_web_mercator_conversion():
 
 
 def test_tower_type_normalization():
-    assert normalize_tower_type("ROOFTOP POLE") == "Rooftop"
-    assert normalize_tower_type("GROUND BASED TOWER (GBT)") == "Ground Based"
-    assert normalize_tower_type("COW WHEEL") == "COW"
-    assert normalize_tower_type(None) == "Rooftop"
+    assert normalize_tower_type("ROOFTOP POLE") == "Rooftop (Blue)"
+    assert normalize_tower_type("GROUND BASED TOWER (GBT)") == "Ground Based (Green)"
+    assert normalize_tower_type("COW WHEEL") == "COW (Orange)"
+    assert normalize_tower_type(None) == "Rooftop (Blue)"
 
 
 def test_district_slides_generation():
@@ -73,9 +73,11 @@ def test_parse_payload_records():
     assert len(sites) == 2
     assert sites[0]["site_id"] == "TS_TEST_001"
     assert sites[0]["latitude"] == 11.9401
-    assert sites[0]["tower_type"] == "Rooftop"
+    assert sites[0]["tower_type"] == "Rooftop (Blue)"
+    assert sites[0]["color_code"] == "Blue"
     assert sites[1]["site_id"] == "TS_TEST_002"
-    assert sites[1]["tower_type"] == "Ground Based"
+    assert sites[1]["tower_type"] == "Ground Based (Green)"
+    assert sites[1]["color_code"] == "Green"
 
 
 def test_api_districts_list():
@@ -111,7 +113,9 @@ def test_api_towers_and_csv_export():
             site_id="SITE_CLOUD_999",
             latitude=11.9300,
             longitude=79.8300,
-            tower_type="Rooftop",
+            tower_type="Rooftop (Blue)",
+            color_code="Blue",
+            city="Ozhukarai",
             state="Puducherry",
             district="Pondicherry"
         )
@@ -124,19 +128,23 @@ def test_api_towers_and_csv_export():
     data = res.json()
     assert data["total"] == 1
     assert data["items"][0]["site_id"] == "SITE_CLOUD_999"
+    assert data["items"][0]["color_code"] == "Blue"
+    assert data["items"][0]["city"] == "Ozhukarai"
 
-    # Export CSV
+    # Export CSV - verify ONLY requested columns and no extra data
     csv_res = client.get("/api/worker/export/csv")
     assert csv_res.status_code == 200
     reader = csv.reader(io.StringIO(csv_res.text))
     rows = list(reader)
     header = rows[0]
-    assert "site_id" in header
-    assert "latitude" in header
-    assert "longitude" in header
-    assert "tower_type" in header
+    assert header == ["site_id", "latitude", "longitude", "tower_type", "color_code", "city"]
     assert len(rows) == 2
     assert rows[1][0] == "SITE_CLOUD_999"
+    assert rows[1][1] == "11.930000"
+    assert rows[1][2] == "79.830000"
+    assert rows[1][3] == "Rooftop (Blue)"
+    assert rows[1][4] == "Blue"
+    assert rows[1][5] == "Ozhukarai"
 
 
 def test_dashboard_endpoint():
@@ -159,7 +167,9 @@ def test_compatibility_with_nexus_rf_parser():
             site_id="SITE_TN_777",
             latitude=11.9401,
             longitude=79.4861,
-            tower_type="Ground Based",
+            tower_type="Ground Based (Green)",
+            color_code="Green",
+            city="Villupuram",
             state="Tamil Nadu",
             district="Villupuram"
         )
@@ -175,7 +185,8 @@ def test_compatibility_with_nexus_rf_parser():
     assert found is not None
     assert found["lat"] == 11.9401
     assert found["lng"] == 79.4861
-    assert found["tower_type"] == "Ground Based"
+    assert "Ground Based" in found["tower_type"]
+
 
 
 

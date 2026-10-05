@@ -182,6 +182,8 @@ def get_captured_towers(
                 "latitude": i.latitude,
                 "longitude": i.longitude,
                 "tower_type": i.tower_type,
+                "color_code": getattr(i, "color_code", "Blue"),
+                "city": getattr(i, "city", i.district),
                 "state": i.state,
                 "district": i.district,
                 "updated_at": i.updated_at.isoformat() if i.updated_at else None
@@ -198,8 +200,9 @@ def export_csv(
     db: Session = Depends(get_db)
 ):
     """
-    Export raw towers CSV compatible with Nexus RF engine import schema:
-    Columns: site_id, latitude, longitude, tower_type, operator, band, technology, height, power
+    Export raw towers CSV containing ONLY:
+    site_id, latitude, longitude, tower_type, color_code, city
+    No extra dummy data.
     """
     query = db.query(CapturedSite)
     if state:
@@ -212,23 +215,24 @@ def export_csv(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "site_id", "latitude", "longitude", "tower_type",
-        "operator", "band", "technology", "height", "power", "state", "district"
+        "site_id", "latitude", "longitude", "tower_type", "color_code", "city"
     ])
 
     for s in sites:
+        city_name = getattr(s, "city", None) or s.district or state or "India"
+        color = getattr(s, "color_code", None) or "Blue"
+        ttype = s.tower_type or f"Rooftop ({color})"
         writer.writerow([
             s.site_id,
             f"{s.latitude:.6f}",
             f"{s.longitude:.6f}",
-            s.tower_type or "Rooftop",
-            "", "", "", "", "",  # operator, band, tech null in raw mode
-            s.state or "",
-            s.district or ""
+            ttype,
+            color,
+            city_name
         ])
 
     output.seek(0)
-    filename = f"tarangsanchar_cloud_{district or state or 'india'}_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    filename = f"tarangsanchar_{district or state or 'towers'}_{datetime.utcnow().strftime('%Y%m%d')}.csv"
     return StreamingResponse(
         output,
         media_type="text/csv",
@@ -238,17 +242,27 @@ def export_csv(
 
 @app.post("/api/worker/sync-nexus")
 async def sync_to_nexus_rf(payload: SyncNexusPayload, db: Session = Depends(get_db)):
-    """Directly pushes all captured towers to the Nexus RF engine /api/import endpoint."""
+    """Directly pushes captured towers to the Nexus RF engine /api/import endpoint."""
     sites = db.query(CapturedSite).all()
     if not sites:
         raise HTTPException(status_code=400, detail="No captured sites in database to sync")
 
-    # Generate CSV payload
+    # Generate minimal CSV payload
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["site_id", "latitude", "longitude", "tower_type", "operator", "band", "technology", "height", "power"])
+    writer.writerow(["site_id", "latitude", "longitude", "tower_type", "color_code", "city"])
     for s in sites:
-        writer.writerow([s.site_id, f"{s.latitude:.6f}", f"{s.longitude:.6f}", s.tower_type or "Rooftop", "", "", "", "", ""])
+        city_name = getattr(s, "city", None) or s.district or "India"
+        color = getattr(s, "color_code", None) or "Blue"
+        ttype = s.tower_type or f"Rooftop ({color})"
+        writer.writerow([
+            s.site_id,
+            f"{s.latitude:.6f}",
+            f"{s.longitude:.6f}",
+            ttype,
+            color,
+            city_name
+        ])
 
     csv_data = output.getvalue()
 

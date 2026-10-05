@@ -20,17 +20,43 @@ def web_mercator_to_wgs84(x: float, y: float) -> Tuple[float, float]:
     return round(lat, 6), round(lng, 6)
 
 
-def normalize_tower_type(raw: Optional[str]) -> str:
-    if not raw or not isinstance(raw, str):
-        return "Rooftop"
-    val = raw.upper()
-    if "GBT" in val or "GROUND" in val or "MAST" in val or "TOWER" in val:
-        return "Ground Based"
-    if "RTT" in val or "ROOF" in val or "POLE" in val or "BUILDING" in val:
-        return "Rooftop"
-    if "COW" in val or "WHEEL" in val:
-        return "COW"
-    return "Rooftop"
+def normalize_tower_type_and_color(raw: Optional[str] = None, category: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Returns (tower_type, color_code).
+    Mapped directly from Tarang Sanchar map color codes:
+    🔵 Blue: Rooftop Tower (RTT) / Building Mount (Cinema, Theatre, Mall, Multiplex, Club)
+    🟢 Green: Ground Based Tower (GBT) / Mast (Shop, Ground, Tower, Hotel, School)
+    🩷 Pink: Wall Mount / Pole (Cafe, Restaurant, Wall, Pole)
+    🟠 Orange: COW (Cell on Wheels) / Temporary
+    """
+    if category:
+        cat = str(category).strip().lower()
+        if any(k in cat for k in ["cinema", "theatre", "theater", "mall", "multiplex", "club", "roof", "rtt"]):
+            return "Rooftop (Blue)", "Blue"
+        if any(k in cat for k in ["shop", "ground", "hotel", "school", "tower", "mast", "gbt", "gbm"]):
+            return "Ground Based (Green)", "Green"
+        if any(k in cat for k in ["cafe", "restaurant", "wall", "pole", "wmt", "micro"]):
+            return "Wall Mount (Pink)", "Pink"
+        if any(k in cat for k in ["cow", "wheel", "temp"]):
+            return "COW (Orange)", "Orange"
+
+    if raw and isinstance(raw, str):
+        val = raw.strip().upper()
+        if any(k in val for k in ["GBT", "GROUND", "MAST", "GREEN"]):
+            return "Ground Based (Green)", "Green"
+        if any(k in val for k in ["RTT", "ROOF", "BUILDING", "BLUE"]):
+            return "Rooftop (Blue)", "Blue"
+        if any(k in val for k in ["WALL", "POLE", "WMT", "PINK"]):
+            return "Wall Mount (Pink)", "Pink"
+        if any(k in val for k in ["COW", "WHEEL", "ORANGE"]):
+            return "COW (Orange)", "Orange"
+
+    return "Rooftop (Blue)", "Blue"
+
+
+def normalize_tower_type(raw: Optional[str], category: Optional[str] = None) -> str:
+    ttype, _ = normalize_tower_type_and_color(raw, category)
+    return ttype
 
 
 class TarangScraperWorker:
@@ -75,7 +101,6 @@ class TarangScraperWorker:
         self.active_cookie_header = cookie_header.strip()
         self.log(f"Active session cookie set ({len(cookie_header)} chars).", "INFO")
         with SessionLocal() as db:
-            # Update or create session record
             s = db.query(WorkerSession).first()
             if not s:
                 s = WorkerSession(cookie_header=self.active_cookie_header, is_valid=True)
@@ -96,6 +121,69 @@ class TarangScraperWorker:
                 return s.cookie_header
         return None
 
+    def _parse_single_item(self, item: Any, state: str, district: str, category: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        if not isinstance(item, dict):
+            return None
+
+        props = item.get("attributes") or item.get("properties") or item
+        geom = item.get("geometry") or {}
+
+        lat = props.get("location_latitude") or props.get("latitude") or props.get("Latitude") or props.get("lat") or props.get("Lat")
+        lng = props.get("location_longitude") or props.get("longitude") or props.get("Longitude") or props.get("lng") or props.get("Lng")
+
+        # Check for geometry coordinates or x, y
+        coords = geom.get("coordinates")
+        if coords and len(coords) >= 2:
+            lng, lat = coords[0], coords[1]
+        elif (lat is None or lng is None) and "y" in props and "x" in props:
+            try:
+                x_val, y_val = float(props["x"]), float(props["y"])
+                if abs(x_val) > 180 or abs(y_val) > 90:
+                    lat, lng = web_mercator_to_wgs84(x_val, y_val)
+                else:
+                    lat, lng = y_val, x_val
+            except (ValueError, TypeError):
+                pass
+
+        if lat is None or lng is None:
+            return None
+
+        try:
+            lat = float(lat)
+            lng = float(lng)
+        except (ValueError, TypeError):
+            return None
+
+        if not (6.0 <= lat <= 38.0 and 68.0 <= lng <= 98.0):
+            return None
+
+        sid = (
+            props.get("url_point") or props.get("SiteId") or props.get("Site_Id")
+            or props.get("SITE_ID") or props.get("id") or props.get("location_id")
+            or f"TS_{lat:.5f}_{lng:.5f}"
+        )
+        sid = str(sid).strip()
+
+        raw_type = props.get("Tower_Type") or props.get("TOWER_TYPE") or props.get("SiteType") or props.get("site_type") or props.get("type")
+        cat = category or props.get("category")
+        ttype, color = normalize_tower_type_and_color(raw_type, cat)
+
+        city = (
+            props.get("city") or props.get("City") or props.get("location") or props.get("Location")
+            or props.get("address") or props.get("site_address") or props.get("area") or props.get("town") or district
+        )
+
+        return {
+            "site_id": sid,
+            "latitude": round(lat, 6),
+            "longitude": round(lng, 6),
+            "tower_type": ttype,
+            "color_code": color,
+            "city": str(city).strip(),
+            "state": state,
+            "district": district
+        }
+
     def parse_payload(self, data: Any, state: str, district: str) -> List[Dict[str, Any]]:
         """Parse Tarang Sanchar GetLocations JSON payload into standard tower dicts."""
         sites: List[Dict[str, Any]] = []
@@ -103,7 +191,21 @@ class TarangScraperWorker:
         if not data:
             return sites
 
-        # 1. Standard Tarang Sanchar structure
+        # 1. Tarang Sanchar Category Grouped structure:
+        # [ { "Cinema": [ ... ], "Shop": [ ... ], "Cafe": [ ... ] } ]
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            for group in data:
+                if any(k in group for k in ["Shop", "Cinema", "Club", "Cafe", "Tower", "Ground"]):
+                    for cat, items in group.items():
+                        if isinstance(items, list):
+                            for item in items:
+                                s = self._parse_single_item(item, state, district, category=cat)
+                                if s:
+                                    sites.append(s)
+                    if sites:
+                        return sites
+
+        # 2. Table, Table1, features, data, or direct list
         records = []
         if isinstance(data, list):
             records = data
@@ -113,83 +215,18 @@ class TarangScraperWorker:
             elif "Table1" in data and isinstance(data["Table1"], list):
                 records = data["Table1"]
             elif "features" in data and isinstance(data["features"], list):
-                # GeoJSON or ESRI Features
                 for f in data["features"]:
-                    props = f.get("properties") or f.get("attributes") or {}
-                    geom = f.get("geometry") or {}
-                    x = geom.get("x")
-                    y = geom.get("y")
-                    coords = geom.get("coordinates")
-                    lat, lng = None, None
-                    if coords and len(coords) >= 2:
-                        lng, lat = coords[0], coords[1]
-                    elif x is not None and y is not None:
-                        if abs(x) > 180 or abs(y) > 90:
-                            lat, lng = web_mercator_to_wgs84(x, y)
-                        else:
-                            lat, lng = y, x
-
-                    if lat and lng:
-                        sid = str(props.get("SiteId") or props.get("SITE_ID") or props.get("id") or f"{lat:.5f}_{lng:.5f}")
-                        ttype = normalize_tower_type(props.get("Tower_Type") or props.get("TOWER_TYPE"))
-                        sites.append({
-                            "site_id": sid,
-                            "latitude": lat,
-                            "longitude": lng,
-                            "tower_type": ttype,
-                            "state": state,
-                            "district": district
-                        })
+                    s = self._parse_single_item(f, state, district)
+                    if s:
+                        sites.append(s)
                 return sites
             elif "data" in data and isinstance(data["data"], list):
                 records = data["data"]
 
         for item in records:
-            if not isinstance(item, dict):
-                continue
-
-            lat = item.get("location_latitude") or item.get("latitude") or item.get("Latitude") or item.get("lat") or item.get("Lat")
-            lng = item.get("location_longitude") or item.get("longitude") or item.get("Longitude") or item.get("lng") or item.get("Lng")
-
-            # Check for x, y coordinates
-            if lat is None and "y" in item and "x" in item:
-                x_val, y_val = float(item["x"]), float(item["y"])
-                if abs(x_val) > 180 or abs(y_val) > 90:
-                    lat, lng = web_mercator_to_wgs84(x_val, y_val)
-                else:
-                    lat, lng = y_val, x_val
-
-            if lat is None or lng is None:
-                continue
-
-            try:
-                lat = float(lat)
-                lng = float(lng)
-            except (ValueError, TypeError):
-                continue
-
-            # India coordinate sanity check
-            if not (6.0 <= lat <= 38.0 and 68.0 <= lng <= 98.0):
-                continue
-
-            sid = item.get("SiteId") or item.get("Site_Id") or item.get("SITE_ID") or item.get("id") or item.get("location_id")
-            if not sid:
-                # url_point fallback or coordinate hash
-                sid = f"TS_{lat:.5f}_{lng:.5f}"
-            sid = str(sid).strip()
-
-            ttype = normalize_tower_type(
-                item.get("Tower_Type") or item.get("TOWER_TYPE") or item.get("SiteType") or item.get("site_type") or item.get("type")
-            )
-
-            sites.append({
-                "site_id": sid,
-                "latitude": round(lat, 6),
-                "longitude": round(lng, 6),
-                "tower_type": ttype,
-                "state": state,
-                "district": district
-            })
+            s = self._parse_single_item(item, state, district)
+            if s:
+                sites.append(s)
 
         return sites
 
@@ -296,11 +333,20 @@ class TarangScraperWorker:
                                                 latitude=s["latitude"],
                                                 longitude=s["longitude"],
                                                 tower_type=s["tower_type"],
+                                                color_code=s.get("color_code", "Blue"),
+                                                city=s.get("city", district),
                                                 state=state,
                                                 district=district
                                             )
                                             db.add(new_site)
                                             added_count += 1
+                                        else:
+                                            # Update city/type if empty
+                                            if not existing.city and s.get("city"):
+                                                existing.city = s.get("city")
+                                            if existing.tower_type != s["tower_type"]:
+                                                existing.tower_type = s["tower_type"]
+                                                existing.color_code = s.get("color_code", "Blue")
                                     db.commit()
                                     self.sites_captured_this_session += added_count
                                     if added_count > 0:

@@ -89,8 +89,28 @@ def test_extension_raw_mode_compatibility():
     assert towers[2]["power_dbm"] == 37.0
 
 
+MINIMAL_RAW_CSV = """site_id,latitude,longitude,tower_type,color_code,city
+"210832",11.90301,79.73184,"Rooftop (Blue)","Blue","Ozhukarai"
+"1033334",11.90471,79.73843,"Ground Based (Green)","Green","Pondicherry"
+"""
+
+
+def test_minimal_clean_csv_compatibility():
+    towers = parse_import(MINIMAL_RAW_CSV)
+    assert len(towers) == 2
+    assert towers[0]["site_id"] == "210832"
+    assert towers[0]["lat"] == 11.90301
+    assert towers[0]["lng"] == 79.73184
+    assert towers[0]["tower_type"] == "Rooftop (Blue)"
+    assert towers[0]["operator"] is None
+    assert towers[1]["site_id"] == "1033334"
+    assert towers[1]["tower_type"] == "Ground Based (Green)"
+
+
 if __name__ == "__main__":
     test_extension_csv_compatibility()
     test_extension_json_compatibility()
     test_extension_raw_mode_compatibility()
-    print("ALL EXTENSION COMPATIBILITY TESTS (INCLUDING RAW MODE) PASSED!")
+    test_minimal_clean_csv_compatibility()
+    print("ALL EXTENSION COMPATIBILITY TESTS (INCLUDING CLEAN RAW MODE) PASSED!")
+

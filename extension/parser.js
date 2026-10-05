@@ -81,34 +81,52 @@
   }
 
   /**
-   * Normalize tower type based on portal color and category key:
-   * 🔵 Blue (Cinema, Theatre, Mall, Multiplex) -> Rooftop
-   * 🟢 Green (Shop, Ground, Hotel, School, Tower) -> Ground
-   * 🩷 Pink (Cafe, Restaurant, Wall) -> WallMount
+   * Normalize tower type and color code based on Tarang Sanchar map marker colors:
+   * 🔵 Blue (Cinema, Theatre, Mall, Multiplex, Club) -> Rooftop (Blue)
+   * 🟢 Green (Shop, Ground, Hotel, School, Tower, Mast) -> Ground Based (Green)
+   * 🩷 Pink (Cafe, Restaurant, Wall, Pole) -> Wall Mount (Pink)
+   * 🟠 Orange (COW, Mobile, Temporary) -> COW (Orange)
    */
-  function normalizeTowerType(raw, category) {
+  function normalizeTowerTypeAndColor(raw, category) {
     if (category) {
       const cat = String(category).trim().toLowerCase();
-      // 🔵 Blue: Rooftop commercial
-      if (['cinema', 'theatre', 'theater', 'mall', 'multiplex'].some(k => cat.includes(k))) {
-        return 'Rooftop';
+      // 🔵 Blue: Rooftop commercial / buildings
+      if (['cinema', 'theatre', 'theater', 'mall', 'multiplex', 'club', 'roof', 'rtt'].some(k => cat.includes(k))) {
+        return { type: 'Rooftop (Blue)', color: 'Blue' };
       }
       // 🟢 Green: Ground Based Tower / Mast
-      if (['shop', 'ground', 'hotel', 'school', 'tower'].some(k => cat.includes(k))) {
-        return 'Ground';
+      if (['shop', 'ground', 'hotel', 'school', 'tower', 'mast', 'gbt', 'gbm'].some(k => cat.includes(k))) {
+        return { type: 'Ground Based (Green)', color: 'Green' };
       }
-      // 🩷 Pink: Wall mount / Microcell
-      if (['cafe', 'restaurant', 'wall'].some(k => cat.includes(k))) {
-        return 'WallMount';
+      // 🩷 Pink: Wall mount / Pole / Microcell
+      if (['cafe', 'restaurant', 'wall', 'pole', 'wmt', 'micro'].some(k => cat.includes(k))) {
+        return { type: 'Wall Mount (Pink)', color: 'Pink' };
+      }
+      // 🟠 Orange: COW / Temporary
+      if (['cow', 'wheel', 'temp', 'mobile'].some(k => cat.includes(k))) {
+        return { type: 'COW (Orange)', color: 'Orange' };
       }
     }
-    if (!raw || typeof raw !== 'string') return 'Rooftop';
-    const s = raw.trim().toUpperCase();
-    if (s.includes('WALL')) return 'WallMount';
-    if (s.includes('GROUND') || s.includes('GBT') || s.includes('GBM') || s.includes('MAST')) {
-      return 'Ground';
+    if (raw && typeof raw === 'string') {
+      const s = raw.trim().toUpperCase();
+      if (s.includes('WALL') || s.includes('POLE') || s.includes('WMT') || s.includes('PINK')) {
+        return { type: 'Wall Mount (Pink)', color: 'Pink' };
+      }
+      if (s.includes('GROUND') || s.includes('GBT') || s.includes('GBM') || s.includes('MAST') || s.includes('GREEN')) {
+        return { type: 'Ground Based (Green)', color: 'Green' };
+      }
+      if (s.includes('ROOF') || s.includes('RTT') || s.includes('BUILDING') || s.includes('BLUE')) {
+        return { type: 'Rooftop (Blue)', color: 'Blue' };
+      }
+      if (s.includes('COW') || s.includes('WHEEL') || s.includes('ORANGE')) {
+        return { type: 'COW (Orange)', color: 'Orange' };
+      }
     }
-    return 'Rooftop';
+    return { type: 'Rooftop (Blue)', color: 'Blue' };
+  }
+
+  function normalizeTowerType(raw, category) {
+    return normalizeTowerTypeAndColor(raw, category).type;
   }
 
   /**
@@ -464,43 +482,34 @@
   }
 
   /**
-   * Convert sites to Raw Mode CSV (pure locations & types with null operator and band)
+   * Convert sites to Raw Mode CSV
+   * Contains ONLY: location coordinate, tower type based on colour code, and location city name
+   * No extra data columns.
    */
   function sitesToRawCSV(sites) {
     const headers = [
       'site_id',
       'latitude',
       'longitude',
-      'operator',
-      'band',
-      'technology',
-      'height',
-      'power',
       'tower_type',
-      'cell_id'
+      'color_code',
+      'city'
     ];
 
     const lines = [headers.join(',')];
     const list = Array.isArray(sites) ? sites : Object.values(sites);
     for (const s of list) {
       const cat = s.category || '';
-      const towerType = normalizeTowerType(s.tower_type, cat);
-      const defaultHeight = towerType === 'Ground' ? 35.0 : (towerType === 'WallMount' ? 12.0 : 25.0);
-      const height = s.height || defaultHeight;
-      const defaultPower = towerType === 'WallMount' ? 37.0 : 43.0;
-      const power = s.power || defaultPower;
+      const towerInfo = normalizeTowerTypeAndColor(s.tower_type, cat);
+      const city = s.city || s.location || s.address || s.district || s.state || '';
 
       const row = [
         `"${(s.site_id || '').replace(/"/g, '""')}"`,
         s.latitude,
         s.longitude,
-        '""',
-        '',
-        '""',
-        height,
-        power,
-        `"${towerType}"`,
-        '""'
+        `"${towerInfo.type}"`,
+        `"${towerInfo.color}"`,
+        `"${city.replace(/"/g, '""')}"`
       ];
       lines.push(row.join(','));
     }
@@ -514,6 +523,7 @@
     normalizeTechnology,
     deriveDefaultBand,
     normalizeTowerType,
+    normalizeTowerTypeAndColor,
     isValidIndiaCoord,
     parseOperatorsString,
     extractCoordinates,

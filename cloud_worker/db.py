@@ -11,9 +11,12 @@ if DATABASE_URL.startswith("postgres://"):
 # SQLite connect_args
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
-# Ensure data dir exists if sqlite
-if DATABASE_URL.startswith("sqlite:///./data"):
-    os.makedirs("./data", exist_ok=True)
+# Ensure parent directory exists for SQLite
+if DATABASE_URL.startswith("sqlite"):
+    db_file = DATABASE_URL.replace("sqlite:///", "")
+    if db_file and db_file != ":memory:":
+        parent = os.path.dirname(os.path.abspath(db_file))
+        os.makedirs(parent, exist_ok=True)
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -27,7 +30,9 @@ class CapturedSite(Base):
     site_id = Column(String(100), unique=True, index=True, nullable=False)
     latitude = Column(Float, nullable=False, index=True)
     longitude = Column(Float, nullable=False, index=True)
-    tower_type = Column(String(50), default="Rooftop")
+    tower_type = Column(String(50), default="Rooftop (Blue)")
+    color_code = Column(String(20), default="Blue")
+    city = Column(String(150), nullable=True, index=True)
     state = Column(String(100), nullable=True, index=True)
     district = Column(String(100), nullable=True, index=True)
     first_seen_at = Column(DateTime, default=datetime.utcnow)
