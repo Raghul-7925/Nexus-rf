@@ -89,9 +89,9 @@ def test_extension_raw_mode_compatibility():
     assert towers[2]["power_dbm"] == 37.0
 
 
-MINIMAL_RAW_CSV = """site_id,latitude,longitude,tower_type,color_code,city
-"210832",11.90301,79.73184,"Rooftop (Blue)","Blue","Ozhukarai"
-"1033334",11.90471,79.73843,"Ground Based (Green)","Green","Pondicherry"
+MINIMAL_RAW_CSV = """site_id,latitude,longitude,tower_type,city
+"210832",11.90301,79.73184,"Rooftop (Blue)","Ozhukarai"
+"1033334",11.90471,79.73843,"Ground Based (Green)","Pondicherry"
 """
 
 

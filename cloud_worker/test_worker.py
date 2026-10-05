@@ -137,14 +137,13 @@ def test_api_towers_and_csv_export():
     reader = csv.reader(io.StringIO(csv_res.text))
     rows = list(reader)
     header = rows[0]
-    assert header == ["site_id", "latitude", "longitude", "tower_type", "color_code", "city"]
+    assert header == ["site_id", "latitude", "longitude", "tower_type", "city"]
     assert len(rows) == 2
     assert rows[1][0] == "SITE_CLOUD_999"
     assert rows[1][1] == "11.930000"
     assert rows[1][2] == "79.830000"
     assert rows[1][3] == "Rooftop (Blue)"
-    assert rows[1][4] == "Blue"
-    assert rows[1][5] == "Ozhukarai"
+    assert rows[1][4] == "Ozhukarai"
 
 
 def test_dashboard_endpoint():

@@ -201,7 +201,7 @@ def export_csv(
 ):
     """
     Export raw towers CSV containing ONLY:
-    site_id, latitude, longitude, tower_type, color_code, city
+    site_id, latitude, longitude, tower_type, city
     No extra dummy data.
     """
     query = db.query(CapturedSite)
@@ -215,7 +215,7 @@ def export_csv(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "site_id", "latitude", "longitude", "tower_type", "color_code", "city"
+        "site_id", "latitude", "longitude", "tower_type", "city"
     ])
 
     for s in sites:
@@ -227,7 +227,6 @@ def export_csv(
             f"{s.latitude:.6f}",
             f"{s.longitude:.6f}",
             ttype,
-            color,
             city_name
         ])
 
@@ -247,10 +246,10 @@ async def sync_to_nexus_rf(payload: SyncNexusPayload, db: Session = Depends(get_
     if not sites:
         raise HTTPException(status_code=400, detail="No captured sites in database to sync")
 
-    # Generate minimal CSV payload
+    # Generate minimal CSV payload (strictly 5 columns)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["site_id", "latitude", "longitude", "tower_type", "color_code", "city"])
+    writer.writerow(["site_id", "latitude", "longitude", "tower_type", "city"])
     for s in sites:
         city_name = getattr(s, "city", None) or s.district or "India"
         color = getattr(s, "color_code", None) or "Blue"
@@ -260,7 +259,6 @@ async def sync_to_nexus_rf(payload: SyncNexusPayload, db: Session = Depends(get_
             f"{s.latitude:.6f}",
             f"{s.longitude:.6f}",
             ttype,
-            color,
             city_name
         ])
 
@@ -410,9 +408,9 @@ def dashboard():
             <i class="fa-solid fa-stop mr-1"></i> Stop
           </button>
           <div class="h-6 w-px bg-gray-700 mx-1"></div>
-          <a href="/api/worker/export/csv" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs px-3 py-2 rounded-lg transition flex items-center gap-1">
-            <i class="fa-solid fa-download"></i> Raw CSV
-          </a>
+          <button onclick="downloadCSV()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs px-3 py-2 rounded-lg transition flex items-center gap-1">
+            <i class="fa-solid fa-download"></i> Raw CSV (5 Cols)
+          </button>
           <button onclick="syncToNexusRF()" class="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-2 rounded-lg transition flex items-center gap-1 shadow-lg shadow-purple-600/30">
             <i class="fa-solid fa-cloud-arrow-up"></i> Sync to Nexus RF
           </button>
@@ -439,8 +437,54 @@ def dashboard():
         </h2>
         <span class="text-[11px] text-gray-500">Live Polling (Every 1.5s)</span>
       </div>
-      <div id="terminal-box" class="terminal-window rounded-lg p-3 h-64 overflow-y-auto text-xs space-y-1">
+      <div id="terminal-box" class="terminal-window rounded-lg p-3 h-48 overflow-y-auto text-xs space-y-1">
         <div class="text-gray-500">[System] Worker initialized. Ready to fetch.</div>
+      </div>
+    </div>
+
+    <!-- Live Captured Towers Preview (Strict 5 Columns) -->
+    <div class="glass-card rounded-xl p-4 space-y-3">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div>
+          <h2 class="text-xs font-semibold text-gray-200 flex items-center gap-2">
+            <i class="fa-solid fa-table-list text-emerald-400"></i> Fetched Towers Database Preview (5 Columns)
+          </h2>
+          <p class="text-[11px] text-gray-500">Live verified data: <code class="text-blue-300 font-mono">site_id, latitude, longitude, tower_type, city</code></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="tower-search" oninput="filterTowersTable()" type="text" placeholder="Search site or city..." class="bg-gray-950 border border-gray-700 text-xs rounded-lg px-2.5 py-1 text-gray-200 outline-none focus:border-blue-500 w-44">
+          <button onclick="fetchCapturedTowersPreview()" class="px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700 transition flex items-center gap-1">
+            <i class="fa-solid fa-arrows-rotate"></i> Refresh
+          </button>
+          <button onclick="downloadCSV()" class="px-2.5 py-1 text-xs bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 rounded-lg border border-emerald-500/40 transition flex items-center gap-1 font-semibold">
+            <i class="fa-solid fa-download"></i> Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto rounded-lg border border-gray-800">
+        <table class="w-full text-left text-xs text-gray-300">
+          <thead class="bg-gray-950/80 text-[11px] uppercase tracking-wider text-gray-400 font-semibold border-b border-gray-800">
+            <tr>
+              <th class="px-3 py-2">Site ID</th>
+              <th class="px-3 py-2">Latitude</th>
+              <th class="px-3 py-2">Longitude</th>
+              <th class="px-3 py-2">Tower Type</th>
+              <th class="px-3 py-2">City / Locality</th>
+            </tr>
+          </thead>
+          <tbody id="towers-table-body" class="divide-y divide-gray-800/60 font-mono text-[11px]">
+            <tr>
+              <td colspan="5" class="px-3 py-6 text-center text-gray-500 font-sans">
+                No captured towers in database yet. Handover session & start sweep to view live rows.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex items-center justify-between text-[11px] text-gray-500 px-1">
+        <span id="towers-count-label">Showing 0 towers</span>
+        <span>Strict 5-column format: site_id, latitude, longitude, tower_type, city</span>
       </div>
     </div>
   </main>
@@ -650,8 +694,83 @@ def dashboard():
       }
     }
 
+    function downloadCSV() {
+      const state = document.getElementById('state-select').value;
+      const district = document.getElementById('district-select').value;
+      let url = '/api/worker/export/csv';
+      const params = [];
+      if (state) params.push(`state=${encodeURIComponent(state)}`);
+      if (district) params.push(`district=${encodeURIComponent(district)}`);
+      if (params.length) url += '?' + params.join('&');
+      window.location.href = url;
+    }
+
+    let allLoadedTowers = [];
+
+    async function fetchCapturedTowersPreview() {
+      try {
+        const state = document.getElementById('state-select').value;
+        const district = document.getElementById('district-select').value;
+        let url = '/api/worker/towers?limit=100';
+        if (state) url += '&state=' + encodeURIComponent(state);
+        if (district) url += '&district=' + encodeURIComponent(district);
+        const res = await fetch(url);
+        const data = await res.json();
+        allLoadedTowers = data.items || [];
+        renderTowersTable(allLoadedTowers, data.total);
+      } catch (e) {
+        console.error("Failed loading towers preview", e);
+      }
+    }
+
+    function renderTowersTable(items, total) {
+      const tbody = document.getElementById('towers-table-body');
+      const countEl = document.getElementById('towers-count-label');
+      if (countEl) countEl.textContent = `Showing ${items.length} of ${total !== undefined ? total : items.length} towers in database`;
+
+      if (!items || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="px-3 py-6 text-center text-gray-500 font-sans">No captured towers in database yet. Handover session & start sweep to view live rows.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map(t => {
+        let badgeColor = 'bg-blue-950/80 text-blue-400 border-blue-800/40';
+        const typeStr = t.tower_type || '';
+        if (typeStr.includes('Green') || typeStr.includes('Ground')) {
+          badgeColor = 'bg-emerald-950/80 text-emerald-400 border-emerald-800/40';
+        } else if (typeStr.includes('Pink') || typeStr.includes('Wall')) {
+          badgeColor = 'bg-pink-950/80 text-pink-400 border-pink-800/40';
+        } else if (typeStr.includes('Orange') || typeStr.includes('COW')) {
+          badgeColor = 'bg-amber-950/80 text-amber-400 border-amber-800/40';
+        }
+
+        return `<tr class="hover:bg-gray-800/30 transition-colors">
+          <td class="px-3 py-2 text-white font-semibold">${t.site_id}</td>
+          <td class="px-3 py-2 text-blue-300">${typeof t.latitude === 'number' ? t.latitude.toFixed(6) : t.latitude}</td>
+          <td class="px-3 py-2 text-blue-300">${typeof t.longitude === 'number' ? t.longitude.toFixed(6) : t.longitude}</td>
+          <td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-[10px] font-sans border ${badgeColor}">${t.tower_type}</span></td>
+          <td class="px-3 py-2 text-gray-300 font-sans">${t.city || t.district || '-'}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function filterTowersTable() {
+      const q = (document.getElementById('tower-search').value || '').trim().toLowerCase();
+      if (!q) {
+        renderTowersTable(allLoadedTowers);
+        return;
+      }
+      const filtered = allLoadedTowers.filter(t => 
+        (t.site_id && String(t.site_id).toLowerCase().includes(q)) ||
+        (t.city && String(t.city).toLowerCase().includes(q)) ||
+        (t.tower_type && String(t.tower_type).toLowerCase().includes(q))
+      );
+      renderTowersTable(filtered, allLoadedTowers.length);
+    }
+
     loadDistricts();
     pollStatus();
+    fetchCapturedTowersPreview();
     setInterval(pollStatus, 1500);
   </script>
 </body>

@@ -492,7 +492,6 @@
       'latitude',
       'longitude',
       'tower_type',
-      'color_code',
       'city'
     ];
 
@@ -508,7 +507,6 @@
         s.latitude,
         s.longitude,
         `"${towerInfo.type}"`,
-        `"${towerInfo.color}"`,
         `"${city.replace(/"/g, '""')}"`
       ];
       lines.push(row.join(','));
