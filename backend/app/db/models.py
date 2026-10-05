@@ -64,3 +64,26 @@ class ImportBatch(Base):
     row_count = Column(Float, default=0)
     format = Column(String, nullable=True)   # csv | json | geojson
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DriveTestPoint(Base):
+    """GPS + cell measurement synced from the Android companion app during drive-test."""
+    __tablename__ = "drive_test_points"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    session_id = Column(String, nullable=False, index=True)
+    timestamp = Column(Float, nullable=False)
+    lat = Column(Float, nullable=False)
+    lng = Column(Float, nullable=False)
+    gps_accuracy_m = Column(Float, nullable=True)
+    operator = Column(String, nullable=True)
+    technology = Column(String, nullable=True)
+    band_name = Column(String, nullable=True)
+    cid = Column(String, nullable=True)
+    enodeb_id = Column(Float, nullable=True)
+    pci = Column(Float, nullable=True)
+    rsrp = Column(Float, nullable=True)
+    rsrq = Column(Float, nullable=True)
+    sinr = Column(Float, nullable=True)
+    timing_advance = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

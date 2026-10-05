@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from .db.session import init_db
-from .api import towers, obstacles, simulate, import_router, compare, export_router, rf_planning
+from .api import towers, obstacles, simulate, import_router, compare, export_router, rf_planning, mobile
 
 app = FastAPI(
     title="Nexus RF API",
@@ -42,6 +42,7 @@ app.include_router(import_router.router)
 app.include_router(compare.router)
 app.include_router(export_router.router)
 app.include_router(rf_planning.router)
+app.include_router(mobile.router)
 
 
 @app.on_event("startup")
